@@ -1,0 +1,105 @@
+data Type = TArrow Type Type
+          | TList 
+          | TInt
+
+data Term = Var Int
+          | Abs Int Type Term
+          | App Type Term Term
+
+sig eqType :: Int -> Type -> Type -> Bool
+fun eqType size t1 t2 = 
+    case t1 of 
+      | TArrow t11 t12 -> 
+          case t2 of 
+            | TArrow t21 t22 -> eqType (size / 2) t11 t21 
+                                && eqType (size / 2) t12 t22
+            | _ -> False
+          end
+      | TInt -> case t2 of 
+                      | TInt -> True
+                      | _ -> False
+                    end
+      | TList -> case t2 of 
+                       | TList -> True 
+                       | _ -> False 
+                     end
+    end
+
+sig force :: Int -> Type -> Bool
+fun force size t = 
+    case t of 
+    | size % TArrow t1 t2 -> force (size / 2) t1 && force (size / 2) t2
+    | 1 % TInt  -> True
+    | 1 % TList -> True
+    end 
+
+sig bind :: Int -> [(Int, Type)] -> Int -> Type -> Bool
+fun bind len g x t = 
+    case g of 
+      | [] -> False
+      | g0:gs -> let' (gid, gt) = g0 in 
+                 (x == gid && eqType 8 gt t) {1} || {len} (x /= gid && bind (len - 1) gs x t)
+    end
+
+sig hasType :: Int -> Int -> [(Int, Type)] -> [(Int, Type)] -> Term -> Type -> Bool
+fun hasType ctxLen size env g e t = 
+    (case e of 
+      | 6 % Var x -> bind ctxLen g x t {1} || {4} bind 16 env x t
+      | 4 % Abs x t1 e' -> 
+--         eqType 5 t1 TInt && 
+         case t of 
+           | TArrow t1' t2' -> (x == ctxLen + 16) && eqType 4 t1 t1' 
+                               && hasType (ctxLen + 1) (size/2) env ((x,t1'):g) e' t2'
+           | _ -> False
+         end
+      | size % App t1 e1 e2 -> 
+          hasType ctxLen (size / 2) env g e1 (TArrow t1 t) 
+          && hasType ctxLen (size / 2) env g e2 t1 
+     end) -- { 1 } || { 1 } 
+--      ((case e of 
+--         | App t1' (App _ (Var v) (Var x)) e2 -> v == 15 &&
+--             [| x | bind ctxLen g x (TArrow TList TList) |] && hasType ctxLen size env g e2 t
+--         | _ -> False
+--       end) ||
+--      (case e of 
+--         | App t1' (App _ (Var v) (Var x)) e2 -> v == 8 &&
+--             [| x | bind ctxLen g x TInt |] && hasType ctxLen size env g e2 t
+--         | _ -> False
+--       end) ||
+--      (case e of 
+--         | App t1' (App _ (Var v) (Var x)) e2 -> v == 7 &&
+--             [| x | bind ctxLen g x TList |] && hasType ctxLen size env g e2 t
+--         | _ -> False
+--       end))
+
+sig closedTerm :: Term -> Bool
+fun closedTerm e  = hasType 0 42  [(0, TInt) -- (undefined :: Int)
+                                  ,(1, TArrow (TArrow TInt (TArrow TInt TInt)) (TArrow TInt (TArrow TInt TInt))) -- id @ Int -> Int -> Int
+                                  ,(2, TArrow (TArrow TInt TInt) (TArrow TList TList)) -- seq :: (Int -> Int) -> [Int] -> [Int]
+                                  ,(3, TArrow TInt TInt) -- id :: Int -> Int
+                                  ,(4, TArrow TInt (TArrow TInt TInt)) -- seq :: Int -> Int -> Int 
+--                                  ] [] e (TArrow TInt TInt)
+                                  ] [] e (TArrow TList TList)
+--                                  ] [] e (TArrow TInt (TArrow TInt TInt))
+
+--  
+-- [(0, TInt) -- Zero
+--                                  ,(1,TArrow TInt TInt) -- Succ
+--                                  ,(2, TList) -- Nil
+--                                  ,(3, TArrow TInt (TArrow TList TList)) -- Cons
+--                                  ,(4, TArrow (TArrow TInt TInt) (TArrow TList TList)) -- map
+--                                  ,(5, TList) -- undefined :: [Int]
+--                                  ,(6, TInt)  -- undefined :: Int
+--                                  ,(7, TArrow TList (TArrow TList TList)) -- seq :: [Int] -> [Int] -> [Int]
+--                                  ,(8, TArrow TInt (TArrow TList TList))  -- seq :: Int -> [Int] -> [Int]
+--                                  ,(9, TArrow TList TInt) -- head
+--                                  ,(10, TArrow TList TList) -- id
+--                                  ,(11, TArrow TInt TInt) -- id 
+--                                  ,(12, TArrow (TArrow TInt TInt) (TArrow TInt TInt)) -- id
+--                                  ,(13, TArrow (TArrow TList TList) (TArrow TList TList)) --id
+--                                  ,(14, TInt) -- (head [])
+--                                  ,(15, TArrow (TArrow TList TList) (TArrow TList TList)) -- seq
+--                                  ] [] e (TArrow TList TList)
+--  
+--  
+-- fun foo x = bind 5 

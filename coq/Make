@@ -1,0 +1,9 @@
+Util.v
+Types.v
+Probability.v
+Valuation.v
+Constraints.v
+Bang.v
+NarrowBase.v
+NarrowCompleteness.v
+NarrowSoundness.v

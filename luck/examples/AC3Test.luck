@@ -1,0 +1,1 @@
+fun foo x y z w = (x < y && y == z && w == 10 && w > z) !x !y !z

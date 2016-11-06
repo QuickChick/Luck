@@ -1,0 +1,41 @@
+-- Simplistic List Map
+-- We need a library!
+
+data Map a = Map Int [(Int, a)]
+
+sig mapSize :: Map a -> Int
+fun mapSize map = let' (Map sz _) = map in sz
+
+sig mapFindAux :: Int -> Int -> [(Int, a)] -> Maybe a
+fun mapFindAux sz x l = 
+  case l of 
+  | [] -> Nothing
+  | (y,a):l' -> if x == y then Just a else mapFindAux sz x l'
+  end
+
+sig mapFind :: Int -> Map a -> Maybe a 
+fun mapFind x map = 
+  let' (Map sz l) = map in 
+  mapFindAux sz x l 
+
+sig mapInsertAux :: Int -> Int -> a -> [(Int, a)] -> Map a
+fun mapInsertAux sz x a l = 
+  case l of 
+    | [] -> Map 1 [(x, a)]
+    | (y,a'):l' -> 
+        if x == y then Map sz ((y,a):l')
+        else let' (Map sz' l'') = mapInsertAux (sz - 1) x a l' in
+             Map (sz' + 1) ((y,a'):l'')
+  end
+
+sig mapInsert :: Int -> a -> Map a -> Map a 
+fun mapInsert x a map = 
+    let' (Map sz l) = map in 
+    mapInsertAux sz x a l
+
+fun test x y = case mapFind x (mapInsert 0 42 (Map 3 [(1, 1),(2,2),(3,3)])) of 
+                 | Just a -> a == y
+                 | _ -> False
+               end
+
+

@@ -1,0 +1,6 @@
+fun foo y = 
+  fresh { x :: [Int] :: 5 } in 
+  case x of 
+  | [] -> True
+  | _  -> False
+  end

@@ -1,0 +1,193 @@
+data Exp = Var Int
+         | Int Int
+         | Add Exp Exp
+         | Eq Exp Exp
+
+data Stmt = Declare Int          Stmt
+          | Asgn Int Exp         Stmt 
+          | If Exp Stmt Stmt     Stmt
+          | For Int Int Int Stmt Stmt
+          | PrintVar Int         Stmt
+          | FunCall Int [Exp]    Stmt 
+          | Empty
+
+data Set = Set Int [Int]
+
+sig setSize :: Set -> Int 
+fun setSize set = let' (Set sz _) = set in sz
+
+sig memberAux :: Int -> Int -> [Int] -> Bool
+fun memberAux sz x l = 
+  case l of 
+  | []  -> False
+  | h:t -> x == h {1} || {sz} memberAux (sz - 1) x t
+  end
+
+sig setMember :: Int -> Set -> Bool
+fun setMember x set = 
+    let' (Set sz l) = set in
+    memberAux (sz - 1) x l
+
+sig setInsert :: Int -> Set -> Set 
+fun setInsert x set = 
+    if setMember x set then set 
+    else let' (Set sz l) = set in 
+         (Set (sz + 1) (x:l))
+
+-- Simplistic List Map
+-- We need a library!
+
+data Map a = Map Int [(Int, a)]
+
+sig mapSize :: Map a -> Int
+fun mapSize map = let' (Map sz _) = map in sz
+
+sig mapFindAux :: Int -> Int -> [(Int, a)] -> Maybe a
+fun mapFindAux sz x l = 
+  case l of 
+  | [] -> Nothing
+  | (y,a):l' -> if x == y then Just a else mapFindAux sz x l'
+  end
+
+sig mapFind :: Int -> Map a -> Maybe a 
+fun mapFind x map = 
+  let' (Map sz l) = map in 
+  mapFindAux sz x l 
+
+sig declaredVar :: Int -> Int -> Bool
+fun declaredVar m x = (0 < x && x < m) !x
+
+-- Generate a good expression 
+-- mode :: if in dead code or not
+-- m    :: number of declared variables
+-- vars :: initialized variables
+-- size :: size of expression
+sig goodExp :: Bool -> Int -> Set -> Int -> Exp -> Bool
+fun goodExp mode m vars size e = 
+    if size == 0 then 
+        case e of 
+          | 1 % Var x -> setMember x vars 
+          | 1 % Int n -> True
+          | _ -> False
+        end
+    else 
+      case e of 
+        | 100 % Var x -> if mode then setMember x vars 
+                         else declaredVar m x
+        | 100 % Int n -> True 
+        | 100 % Add e1 e2 -> 
+            goodExp mode m vars (size / 2) e1 
+            && goodExp mode m vars (size / 2) e2
+        | 100 % Eq  e1 e2 -> 
+            goodExp mode m vars (size / 2) e1 
+            && goodExp mode m vars (size / 2) e2
+      end
+
+sig goodExpN :: Int -> Int -> Bool -> Int -> Set -> Int -> [Exp] -> Bool
+fun goodExpN undefs n mode m vars size es = 
+  case es of 
+    | [] -> undefs == 0 && n == 0
+    | e:es' -> 
+      if undefs > 0 then 
+        case e of 
+          | 1 % Var x -> 
+            declaredVar m x -- Can be undefined!
+            && goodExpN (undefs - 1) n mode m vars size es' 
+          | 1 % _ -> 
+            goodExp mode m vars 2 e 
+            && goodExpN (undefs - 1) n mode m vars size es' 
+        end
+      else if n > 0 then 
+        goodExp mode m vars 2 e && goodExpN undefs (n-1) mode m vars size es'
+      else False
+  end
+
+sig futureFun :: Int -> Int -> Map (Int, Int) -> Maybe (Int, Int)
+fun futureFun f funId ctx = 
+    if f > funId then mapFind f ctx
+    else Nothing
+
+-- Generate a well-defined function
+-- funId  :: Id of the function being generated
+-- sigCtx :: Context with function signatures
+-- mode   :: DeadCodeMode or Not
+-- m      :: Number of declared variables (to generate next ones. Can be undefined)
+-- vars   :: List of initialized variables. Can be assigned *and* used
+-- size   :: Stmt to generate
+-- s      :: Program
+sig goodFun :: Int -> Map (Int, Int) -> Bool -> Int -> Set -> Int -> Int -> Stmt -> Bool
+fun goodFun funId ctx mode m vars forVars size s = 
+    case s of 
+      | size % Declare x s' -> 
+        x == m && goodFun funId ctx mode (m+1) vars forVars (size -1) s'
+      | size % Asgn x e s' -> 
+        declaredVar m x 
+        && goodExp mode m vars size e
+        && goodFun funId ctx mode m (setInsert x vars) forVars (size - 1) s'
+      | size % If e s1 s2 s' ->
+        goodExp mode m vars size e
+        && goodFun funId ctx mode m vars forVars (size / 4) s1 
+        && goodFun funId ctx mode m vars forVars (size / 4) s2
+        && goodFun funId ctx mode m vars forVars (size / 2) s' 
+      | size % For i low high sfor s' -> 
+          i == forVars && low == 0 && high == 5 && 
+          goodFun funId ctx mode m vars (forVars + 1) (size / 2) sfor &&
+          goodFun funId ctx mode m vars forVars (size / 2) s'
+      | size % PrintVar x s' -> 
+        (if mode then setMember x vars else declaredVar m x)
+        && goodFun funId ctx mode m vars forVars (size - 1) s'
+      | % ((5-funId)*size) % FunCall f es s' -> -- 5 should be ctx size
+        fresh { u :: Bool :: 1 } in 
+        case u of 
+          | 90 % True ->  -- Most of the time call a function
+             case futureFun f funId ctx of 
+             | 999 % Just (undefNo, varNo) -> 
+               goodExpN undefNo varNo mode m vars size es
+               && goodFun funId ctx mode m vars forVars (size -1) s'
+             | Nothing -> False
+             end
+         | 1 % False -> -- Loop or empty
+           mode && 
+           case es of 
+             | 999 % [] -> 
+                 ((f == -2) && goodFun funId ctx True m vars  forVars (size - 1) s') {990} || {10} 
+                 ((f == -1) && goodFun funId ctx False m vars forVars (size - 1) s')
+             | _  -> False
+           end
+        end
+      | 1 % Empty -> True
+--      | _ -> False
+    end
+
+sig initSetAux :: Int -> Int -> [Int] -> Set 
+fun initSetAux tot n acc =
+    if n < 0 then Set tot acc
+    else initSetAux tot (n-1) (n:acc)
+
+sig initSet :: Int -> Set 
+fun initSet n = initSetAux n (n-1) []
+
+-- Generate functions 
+sig goodFuns :: Map (Int, Int) -> [Stmt] -> [(Int, (Int, Int))] -> Bool
+fun goodFuns ctx ss sigs = 
+    case sigs of 
+      | [] -> case ss of 
+              | [] -> True 
+              | _  -> False
+              end
+      | (fid, (undefNo, varsNo)):sigs' -> 
+          case ss of 
+            | [] -> False
+            | s:ss' -> 
+              goodFun fid ctx True (undefNo + varsNo) (initSet varsNo) 0 42 s 
+              && goodFuns ctx ss' sigs'
+          end
+    end
+
+sig initCtx :: Unit -> Map (Int, Int)
+fun initCtx x = Map 5 [(0, (1,2)),(1, (1,2)),(2, (1,2)),(3, (1,2)),(4, (1,2))]
+
+sig main :: [Stmt] -> Bool
+fun main ss = 
+    let' (Map sz sigs) = initCtx () in
+    goodFuns (Map sz sigs) ss sigs

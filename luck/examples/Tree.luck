@@ -1,0 +1,9 @@
+data Tree a = Leaf a | Node a (Tree a) (Tree a)
+             
+sig weird :: Tree Bool -> Bool
+fun weird x = 
+    case x of 
+    | Leaf x -> x 
+    | Node x l r -> not x && weird l && weird r
+    end
+

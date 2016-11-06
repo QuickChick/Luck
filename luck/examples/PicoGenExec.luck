@@ -1,0 +1,444 @@
+data Label = L | H
+
+data Atom = Atom Label Int
+
+data Instr
+    = Noop
+    | Add
+    | Push Atom
+    | Pop
+    | Load
+    | Store
+    | Jump
+    | Call Int Bool
+    | Return Bool
+    | Halt
+
+data StkElt = Data Atom
+            | Ret  (Label, (Int, Bool))
+
+data AS = AS [Atom] [Instr] [StkElt] Atom
+
+sig try_ :: Bool -> Bool
+fun try_ a = case a of
+  | 99 % True -> True
+  | 1 % False -> True
+  end
+
+sig tryAndMaybe_ :: Bool -> Maybe a -> Maybe a
+fun tryAndMaybe_ x m =
+  case x of
+  | 99 % True -> m
+  | 1 % False -> Nothing
+  end
+
+sig eqL :: Label -> Label -> Bool
+fun eqL l1 l2 =
+    case (l1, l2) of
+    | (L, L) -> True
+    | (H, H) -> True
+    | _ -> False
+    end
+
+sig isLow :: Label -> Bool
+fun isLow l = eqL L l
+
+sig isHigh :: Label -> Bool
+fun isHigh l = eqL H l
+
+sig wellFormedLabel :: Label -> Bool
+fun wellFormedLabel l =
+    case l of
+    | 1 % L -> True
+    | 1 % H -> True
+    end
+
+sig labelLeq :: Label -> Label -> Bool
+fun labelLeq l m =
+    case l of
+    | H ->
+        case m of
+        | H -> True
+        | L -> False
+        end
+    | L -> True
+    end
+
+sig isHighAtom :: Atom -> Bool
+fun isHighAtom pc =
+    let' (Atom l _) = pc in
+    isHigh l
+
+-- Does *not* instantiate
+sig inRange :: Int -> Bool
+fun inRange x = 0 <= x && x < 10
+
+sig isProgAddr :: Int -> Bool
+fun isProgAddr x = 0 <= x && x < 10
+
+sig isMemAddr :: Int -> Bool
+fun isMemAddr x = 0 <= x && x < 10
+
+-- TODO factor
+sig nth :: Int -> [a] -> Maybe a
+fun nth n l =
+    if n == 0 then
+        case l of
+        | i:_ -> Just i
+        | _ -> Nothing
+        end
+    else
+        case l of
+        | _:is -> nth (n-1) is
+        | _ -> Nothing
+        end
+
+sig indistAtom :: Atom -> Atom -> Bool
+fun indistAtom a1 a2 =
+    let' (Atom l1 v1) = a1 in
+    let' (Atom l2 v2) = a2 in
+    eqL l1 l2 &&
+    if isLow l1 then
+        (v1 == v2) !v1 !v2
+    else
+        inRange v1 !v1 && inRange v2 !v2
+
+sig indistAtomList :: [Atom] -> [Atom] -> Bool
+fun indistAtomList l1 l2 =
+    case (l1, l2) of
+    | ([], []) -> True
+    | (a1:t1, a2:t2) -> indistAtom a1 a2 && indistAtomList t1 t2
+    | _ -> False
+    end
+
+sig indistInstr :: Instr -> Instr -> Bool
+fun indistInstr i1 i2 =
+    case (i1, i2) of
+    | (Push a1, Push a2) -> indistAtom a1 a2
+    | (Noop, Noop) -> True
+    | (Add, Add) -> True
+    | (Pop, Pop) -> True
+    | (Load, Load) -> True
+    | (Store, Store) -> True
+    | (Jump, Jump) -> True
+    | (Call a1 True, Call a2 True) -> inRange a1 !a1 && (a1 == a2) !a2
+    | (Return True, Return True) -> True
+    | (Halt, Halt) -> True
+    | _ -> False
+    end
+
+sig indistStkElt :: StkElt -> StkElt -> Bool
+fun indistStkElt s1 s2 =
+    case (s1, s2) of
+    | (Data d1, Data d2) -> indistAtom d1 d2
+    | (Ret (l1, (i1, True)), Ret (l2, (i2, True))) ->
+        case (l1, l2) of
+        | (H, H) -> inRange i1 && inRange i2
+        | (L, L) -> inRange i1 && i1 == i2
+        | _ -> False
+        end
+    | _ -> False
+    end
+
+sig indistStkLow :: [StkElt] -> [StkElt] -> Bool
+fun indistStkLow s1 s2 =
+    case (s1, s2) of
+    | ([], []) -> True
+    | (x1 : s1', x2 : s2') -> indistStkElt x1 x2 && indistStkLow s1' s2'
+    | _ -> False
+    end
+
+sig indistStkCrop2 :: [StkElt] -> [StkElt] -> Bool
+fun indistStkCrop2 s1 s2 =
+    case s2 of
+    | Ret (l, (i, b)) : s2' ->
+        case l of
+        | L -> indistStkLow s1 (Ret (l, (i, b)) : s2')
+        | H -> indistStkCrop2 s1 s2'
+        end
+    | _ : s2' -> indistStkCrop2 s1 s2'
+    | [] -> indistStkLow s1 []
+    end
+
+sig indistStkCrop :: [StkElt] -> [StkElt] -> Bool
+fun indistStkCrop s1 s2 =
+    case s1 of
+    | Ret (l, (i, b)) : s1' ->
+        case l of
+        | L -> indistStkCrop2 (Ret (l, (i, b)) : s1') s2
+        | H -> indistStkCrop s1' s2
+        end
+    | _ : s1' -> indistStkCrop s1' s2
+    | [] -> indistStkCrop2 [] s2
+    end
+
+sig length :: [a] -> Int -> Bool
+fun length l n =
+    if n == 0 then
+        case l of
+        | [] -> True
+        | _  -> False
+        end
+    else
+        case l of
+        | [] -> False
+        | (x : xs) -> length xs (n-1)
+        end
+
+sig length' :: [a] -> Int
+fun length' l =
+    case l of
+    | [] -> 0
+    | _ : t -> 1 + length' t
+    end
+
+fun wellFormedAtom a =
+    let' Atom l n = a in
+    inRange n &&
+    wellFormedLabel l
+
+sig wellFormedMemory :: [Atom] -> Bool
+fun wellFormedMemory l =
+    case l of
+    | 1 % [] -> True
+    | 10 % a : as -> wellFormedAtom a && wellFormedMemory as
+    end
+
+sig wellFormedStack :: [StkElt] -> Bool
+fun wellFormedStack st =
+    case st of
+    | 1 % [] -> True
+    | 10 % (x : xs) ->
+        case x of
+        | 5 % Data (Atom l x) ->
+            inRange x &&
+            wellFormedLabel l
+        | 1 % Ret (l, (addr, True)) ->
+            isProgAddr addr &&
+            wellFormedLabel l
+        | Ret (_, (_, False)) -> False
+        end &&
+        wellFormedStack xs
+    end
+
+sig stackLength :: [StkElt] -> Int -> (Int, Bool)
+fun stackLength stack n =
+    case stack of
+    | [] -> (n, False)
+    | (Ret _ : _ ) -> (n, True)
+    | (Data _ : s) -> stackLength s (n+1)
+    end
+
+sig indistInstrList :: [Instr] -> [Instr] -> Bool
+fun indistInstrList i1 i2 =
+    case (i1, i2) of
+    | ([], []) -> True
+    | (h1:t1, h2:t2) -> indistInstr h1 h2 && indistInstrList t1 t2
+    | _ -> False
+    end
+
+sig setNth :: Int -> a -> [a] -> Maybe [a]
+fun setNth n x l =
+    case l of
+    | h : t ->
+        if n == 0 then
+            Just (x : t)
+        else
+            case setNth (n-1) x t of
+            | Just t' -> Just (h : t')
+            | Nothing -> Nothing
+        end
+    | [] -> Nothing
+    end
+
+sig insertNth :: Int -> a -> [a] -> Maybe [a]
+fun insertNth n x l =
+    if n == 0 then
+        Just (x : l)
+    else
+        case l of
+        | h : t ->
+            case insertNth (n-1) x t of
+            | Just t' -> Just (h : t')
+            | Nothing -> Nothing
+            end
+        | [] -> Nothing
+        end
+
+sig join :: Label -> Label -> Label
+fun join l1 l2 =
+    case l1 of
+    | L -> l2
+    | H -> H
+    end
+
+sig add :: Atom -> Atom -> Atom
+fun add a1 a2 =
+    let' (Atom l1 x1) = a1 in
+    let' (Atom l2 x2) = a2 in
+    let' () = () !x1 !x2 in
+Atom (join l1 l2) (x1 + x2)
+
+sig getReturn :: [StkElt] -> Maybe ((Label, (Int, Bool)), [StkElt])
+fun getReturn s =
+  case s of
+  | Data _ : s -> getReturn s
+  | [] -> Nothing
+  | Ret r : s -> Just (r, s)
+  end
+
+-- Just Nothing = Halted
+sig step :: AS -> Maybe (Maybe AS)
+fun step st =
+    let' (AS m is s pc) = st in
+    let' (Atom lPC aPC) = pc in
+    case nth aPC is of
+    | Just i ->
+        case i of
+        | 1 % Noop -> Just (Just (AS m is s (Atom lPC (aPC+1))))
+        | 40 % Add  ->
+            case s of
+            | Data a1 : Data a2 : s' ->
+                Just (Just (AS m is (Data (add a1 a2):s') (Atom lPC (aPC+1))))
+            | _ -> Nothing
+            end
+        | 80 % Push x ->
+Just (Just (AS m is (Data x:s) (Atom lPC (aPC+1))))
+        | 40 % Pop  ->
+            case s of
+| Data _ : s' ->
+                Just (Just (AS m is s' (Atom lPC (aPC+1))))
+            | _ -> Nothing
+            end
+        | 40 % Load ->
+            case s of
+            | Data a : s' ->
+                let' (Atom lptr ptr) = a in
+                tryAndMaybe_ (isMemAddr ptr !ptr) (
+                    case nth ptr m of
+                    | Just (Atom ldata d) ->
+                        let' l' =
+join lptr ldata
+                        in
+                        Just (Just
+                            (AS m is (Data (Atom l' d) : s') (Atom lPC (aPC+1)))
+                        )
+                    | Nothing -> Nothing
+                    end
+                )
+            | _ -> Nothing
+            end
+        | 40 % Store ->
+            case s of
+            | Data (Atom lptr ptr) : Data (Atom l n) : s' ->
+                tryAndMaybe_ (
+                    isMemAddr ptr !ptr &&
+                    case nth ptr m of
+                    | Just (Atom l' n') ->
+labelLeq lPC l' &&
+labelLeq lptr l'
+                    | Nothing -> False
+                    end
+                ) (
+                    let' atom =
+Atom (join (join lptr lPC) l) n
+                    in
+                    case setNth ptr atom m of
+                    | Just m' -> Just (Just (AS m' is s' (Atom lPC (aPC+1))))
+                    | Nothing -> Nothing
+                    end
+                )
+            | _ -> Nothing
+            end
+        | 40 % Jump ->
+            case s of
+            | Data (Atom labPtr ptr) : s' ->
+                tryAndMaybe_ (isProgAddr ptr !ptr) (
+                    let' lPC' =
+join lPC labPtr
+                    in
+                    Just (Just (AS m is s' (Atom lPC' ptr)))
+                )
+            | _ -> Nothing
+            end
+        | 40 % Call n True ->
+            case s of
+            | Data (Atom labPtr ptr) : s' ->
+                let' (stackL, _) = stackLength s' 0 in
+                tryAndMaybe_ (
+                    isProgAddr ptr !ptr &&
+                    (0 <= n && n <= stackL) !n
+                ) (
+                    let' stkElt = Ret (lPC, (aPC+1, True)) in
+                    case insertNth n stkElt s' of
+                    | Just s'' ->
+                        let' l' =
+join labPtr lPC
+                        in
+                        Just (Just (AS m is s'' (Atom l' ptr)))
+                    | Nothing -> Nothing
+                    end
+                )
+            | _ -> Nothing
+            end
+        | 40 % Return True ->
+            case s of
+            | Data (Atom lx x) : s' ->
+                case getReturn s' of
+                | Just ((retl, (retptr, True)), s'') ->
+                    -- (isProgAddr retPtr == True) by construction
+                    let' l' =
+join lx lPC
+                    in
+                    Just (Just
+                        (AS m is (Data (Atom l' x) : s'') (Atom retl retptr))
+                    )
+                | _ -> Nothing
+                end
+            | _ -> Nothing
+            end
+        | Call _ False -> Nothing -- TODO
+        | Return False -> Nothing -- TODO
+        | 5 % Halt -> Just Nothing
+        end
+    | _ -> Nothing
+    end
+
+sig runsLong :: Int -> AS -> Bool
+fun runsLong len st =
+    if len <= 0 then True
+    else
+        try_ (
+            case step st of
+            | 99 % Just state ->
+                case state of
+                | Nothing -> True
+                | Just st' ->
+                    let' len' = len-1 in
+                    runsLong len' st'
+                end
+            | 1 % Nothing -> False
+            end
+        )
+
+sig wellFormed :: AS -> Bool
+fun wellFormed as =
+    let' (AS mem instrs stack pc) = as in
+    let' (Atom pcLab addr) = pc in
+    length instrs 10 &&
+    wellFormedMemory mem &&
+    length stack 0 &&
+    isLow pcLab &&
+    addr == 0 !addr
+
+sig indistState :: AS -> AS -> Bool
+fun indistState as1 as2 =
+    let' (AS m1 i1 s1 pc1) = as1 in
+    let' (AS m2 i2 s2 pc2) = as2 in
+    indistAtom pc1 pc2 && indistAtomList m1 m2 && indistInstrList i1 i2
+    -- Low, does the same as EQUIVFULL if STARTARBITRARY is *not* defined.
+    && indistStkLow s1 s2
+
+sig statePred :: AS -> AS -> Bool
+fun statePred {as1 :: 100} {as2 :: 100} =
+    wellFormed as1 && runsLong 10 as1 && indistState as1 as2

@@ -1,0 +1,16 @@
+-- Check that xs is a list of length n with exactly k True elements.
+-- Invariant: n >= k >= 0
+sig isC :: Int -> Int -> [Bool] -> Bool
+fun isC n k xs =
+  case xs of
+  | [] -> n == 0
+  | x : xs ->
+    n > 0 &&
+    case x of
+    | % k+1 % True -> k > 0 && isC (n-1) (k-1) xs
+    | % n-k+1 % False -> n > k && isC (n-1) k xs
+    end
+  end
+
+sig isC' :: [Bool] -> Bool
+fun isC' {xs :: 1000} = isC 13 3 xs

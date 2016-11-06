@@ -1,0 +1,28 @@
+-- Simplistic ListSet data structure. 
+-- We need a proper library
+data Set = Set Int [Int]
+
+sig setSize :: Set -> Int 
+fun setSize set = let' (Set sz _) = set in sz
+
+sig memberAux :: Int -> Int -> [Int] -> Bool
+fun memberAux sz x l = 
+  case l of 
+  | []  -> False
+  | h:t -> x == h {1} || {sz} memberAux (sz - 1) x t
+  end
+
+sig setMember :: Int -> Set -> Bool
+fun setMember x set = 
+    let' (Set sz l) = set in
+    memberAux (sz - 1) x l
+
+sig setInsert :: Int -> Set -> Set 
+fun setInsert x set = 
+    if setMember x set then set 
+    else let' (Set sz l) = set in 
+         (Set (sz + 1) (x:l))
+
+fun test x = setMember x (setInsert 4 (Set 3 [1,2,3]))
+
+

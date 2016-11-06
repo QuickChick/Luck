@@ -1,0 +1,21 @@
+import Control.Monad
+import qualified Control.Exception as E
+import System.IO
+
+handler (E.ErrorCall s) = putStrLn $ "*** Exception"
+
+incomplete1 0 = [undefined]
+incomplete1 n = n:(incomplete1 $ n-1)
+incomplete2 0 = undefined
+incomplete2 n = n:(incomplete2 $ n-1)
+
+main = do 
+  hSetBuffering stdout NoBuffering
+  forM_ codelist $ \code -> do 
+    forM_ [0..2] $ \x -> do 
+      E.catch (print $ code $ incomplete1 x) handler
+      E.catch (print $ code $ incomplete2 x) handler
+    putStrLn "-----------------------"
+
+codelist = [
+

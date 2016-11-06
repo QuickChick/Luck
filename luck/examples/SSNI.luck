@@ -1,0 +1,221 @@
+-- TODO: explicitly force the whole pair of states to ensure that
+-- integers are in a sane range (in particular, nonnegative).
+
+data Label = L | H
+
+data Instr = Noop
+           | Add
+           | Push Atom
+           | Pop
+           | Load
+           | Store
+           | Jump
+           | Call Int Bool
+           | Return Bool
+           | Halt
+
+data Atom = Atom Label Int
+
+data StkElt = Data Atom
+            | Ret (Label, (Int, Bool))
+
+data AS = AS [Atom] [Instr] [StkElt] Atom
+
+sig eqL :: Label -> Label -> Bool
+fun eqL l1 l2 =
+    case (l1, l2) of
+    | (L, L) -> True
+    | (H, H) -> True
+    | _ -> False
+    end
+
+sig isLow :: Label -> Bool
+fun isLow l = eqL L l
+
+sig isHigh :: Label -> Bool
+fun isHigh l = eqL H l
+
+sig eqInt :: Int -> Int -> Bool
+fun eqInt n1 n2 = fix { 2 :: (n1 == n2) !n1} !n2
+
+sig indistAtom :: Atom -> Atom -> Bool
+fun indistAtom a1 a2 =
+    let' (Atom l1 v1) = a1 in
+    let' (Atom l2 v2) = a2 in
+    eqL l1 l2 && if isLow l1 then eqInt v1 v2 else v2 >= 0
+
+sig indistAtomList :: [Atom] -> [Atom] -> Bool
+fun indistAtomList l1 l2 =
+    case (l1, l2) of
+    | ([], []) -> True
+    | (a1:t1, a2:t2) -> indistAtom a1 a2 && indistAtomList t1 t2
+    | _ -> False
+    end
+
+sig indistInstr :: Instr -> Instr -> Bool
+fun indistInstr i1 i2 =
+  case (i1, i2) of
+    | (Push a1, Push a2) -> indistAtom a1 a2
+    | (Noop, Noop) -> True
+    | (Add, Add) -> True
+    | (Pop, Pop) -> True
+    | (Load, Load) -> True
+    | (Store, Store) -> True
+    | (Jump, Jump) -> True
+    | (Call a1 True, Call a2 True) -> eqInt a1 a2
+    | (Return True, Return True) -> True
+    | (Halt, Halt) -> True
+    | _ -> False
+  end
+
+sig indistStkElt :: StkElt -> StkElt -> Bool
+fun indistStkElt s1 s2 =
+    case (s1, s2) of
+      | (Data d1, Data d2) -> indistAtom d1 d2
+      | (Ret (l1, (x1, True)), Ret (l2, (x2, True))) -> indistAtom (Atom l1 x1) (Atom l2 x2)
+      | _ -> False
+    end
+
+sig indistStkLow :: [StkElt] -> [StkElt] -> Bool
+fun indistStkLow s1 s2 =
+    case (s1, s2) of
+      | ([], []) -> True
+      | (x:s1', y:s2') -> indistStkElt x y && indistStkLow s1' s2'
+      | _ -> False
+    end
+
+sig indistStkCrop2 :: [StkElt] -> [StkElt] -> Bool
+fun indistStkCrop2 s1 s2 =
+    case s2 of
+      | ((Ret (l, _)):s2') ->
+        case l of
+          | L -> indistStkLow s1 s2'
+          | H -> indistStkCrop2 s1 s2'
+        end
+      | (_:s2') -> indistStkCrop2 s1 s2'
+      | _ -> False
+    end
+
+sig indistStkCrop :: [StkElt] -> [StkElt] -> Bool
+fun indistStkCrop s1 s2 =
+    case s1 of
+      | (Ret (l, _):s1') ->
+          case l of
+            | L -> indistStkCrop2 s1' s2
+            | H -> indistStkCrop s1' s2
+          end
+      | (_:s1') -> indistStkCrop s1' s2
+      | _ -> False
+    end
+
+sig crop :: [StkElt] -> Maybe [StkElt]
+fun crop x =
+    case x of
+    | (Ret (l, _) : x') ->
+        case l of
+        | L -> Just x
+        | H -> crop x'
+        end
+    | (_ : x') -> crop x'
+    | _ -> Nothing
+    end
+
+sig indistStkCrop' :: [StkElt] -> [StkElt] -> Bool
+fun indistStkCrop' x1 x2 =
+    case crop x1 of
+    | Just x1' ->
+       case crop x2 of
+       | Just x2' -> indistStkLow x1' x2'
+       | _ -> False
+       end
+    | _ -> False
+    end
+
+sig indistInstrList :: [Instr] -> [Instr] -> Bool
+fun indistInstrList i1 i2 =
+    case (i1, i2) of
+      | ([], []) -> True
+      | (h1:t1, h2:t2) -> indistInstr h1 h2 && indistInstrList t1 t2
+      | _ -> False
+    end
+
+fun inRange x = (x >= 0 && x < 2) !x
+
+sig length :: [a] -> Int -> Bool
+fun length x n =
+    case x of
+    | [] -> n == 0
+    | _:t -> n > 0 && length t (n-1)
+    end
+
+sig or_ :: Bool -> Bool -> Bool
+fun or_ a b =
+    case a of
+    | True -> True
+    | False -> b
+    end
+
+sig stackLengthGt :: [StkElt] -> Int -> Bool
+fun stackLengthGt stack n =
+    or_ (n == 0) (case stack of
+    | 5 % Data _ : s -> stackLengthGt s (n-1)
+    | 1 % _ -> False
+    end)
+
+sig stackReturns :: [StkElt] -> Bool
+fun stackReturns stack =
+    case stack of
+    | Ret _ : _ -> True
+    | Data _ : stack' -> stackReturns stack'
+    | [] -> False
+    end
+
+sig wellFormedInstr :: Instr -> [StkElt] -> Bool
+fun wellFormedInstr i stack =
+    case i of
+    | Noop -> True
+    | Add -> stackLengthGt stack 2
+    | Push _ -> True
+    | Pop -> stackLengthGt stack 1
+    | Load -> stackLengthGt stack 1
+    | Store -> stackLengthGt stack 2
+    | Jump -> stackLengthGt stack 1
+    | Call n True -> (0 <= n && n < 4) !n && stackLengthGt stack n && stackReturns stack
+    | Return True -> stackLengthGt stack 1
+    | Halt -> True
+    | _ -> False
+    end
+
+sig nth :: [a] -> Int -> Maybe a
+fun nth x n =
+    case x of
+    | [] -> Nothing
+    | h:t -> if n == 0 then Just h
+             else nth t (n-1)
+    end
+
+sig wellFormedInstrs :: [Instr] -> Int -> [StkElt] -> Bool
+fun wellFormedInstrs instrs addr stack =
+     case nth instrs addr of
+       | Just i -> wellFormedInstr i stack
+       | Nothing -> False
+     end
+
+sig wellFormed :: AS -> Bool
+fun wellFormed as =
+    let' (AS mem instrs stack pc) = as in
+    let' (Atom pcLab addr) = pc in
+    inRange addr && length mem 2 && length instrs 2
+    && length stack 4
+    && wellFormedInstrs instrs addr stack
+
+sig indistState :: AS -> AS -> Bool
+fun indistState as1 as2 =
+    let' (AS m1 i1 s1 pc1) = as1 in
+    let' (AS m2 i2 s2 pc2) = as2 in
+    indistAtom pc1 pc2 && indistAtomList m1 m2 && indistInstrList i1 i2
+    && indistStkCrop' s1 s2
+
+sig statePred :: AS -> AS -> Bool
+fun statePred as1 as2 =
+    wellFormed as1 && indistState as1 as2

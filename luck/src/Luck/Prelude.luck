@@ -1,0 +1,35 @@
+data Maybe a = Just a | Nothing
+
+fun or u w1 w2 e1 e2 = 
+   case u of 
+   | w1 % True -> 
+     case e1 of 
+     | True -> True
+     | False -> e2 
+     end
+   | w2 % False -> 
+     case e2 of 
+     | True -> True
+     | False -> e1
+     end 
+   end 
+
+fun and u w1 w2 e1 e2 = 
+   case u of 
+   | w1 % True -> 
+     case e1 of 
+     | True -> e2 
+     | False -> False 
+     end
+   | w2 % False -> 
+     case e2 of 
+     | True -> e1 
+     | False -> False
+     end 
+   end 
+    
+fun notF e = 
+  case e of 
+  | True -> False
+  | False -> True
+  end

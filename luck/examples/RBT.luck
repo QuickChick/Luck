@@ -1,0 +1,34 @@
+-- BEGIN inductives HERE
+data Color = Red | Black
+data RBT a = Leaf | Node Color a (RBT a) (RBT a)
+-- END inductives HERE
+
+-- BEGIN isRBT HERE
+sig isRBT' :: Int -> Int -> Int -> Color -> RBT Int -> Bool
+fun isRBT' h low high c t = 
+  if h == 0 then
+      case (c, t) of
+        | (_, Leaf) -> True
+        | (Black, Node Red x Leaf Leaf) -> (low < x && x < high) !x
+        | _ -> False
+      end
+  else case (c, t) of
+         | (Red, Node Black x l r) ->
+              (low < x && x < high) !x
+              && isRBT' (h-1) low x  Black l
+              && isRBT' (h-1) x high Black r
+         | (Black, Node Red x l r) ->
+              (low < x && x < high) !x
+              && isRBT' h low x  Red l
+              && isRBT' h x high Red r
+         | (Black, Node Black x l r) ->
+              (low < x && x < high) !x
+              && isRBT' (h-1) low x  Black l
+              && isRBT' (h-1) x high Black r
+         | _ -> False
+       end
+-- END isRBT HERE
+
+-- | This leads to h height!
+sig isRBT :: RBT Int -> Bool
+fun isRBT t = isRBT' 6 0 (42424242) Red t

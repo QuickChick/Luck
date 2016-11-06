@@ -1,0 +1,5 @@
+fun foo1 x y = x < y
+fun foo2 x = 0 < x && x < 5
+fun foo3 x y = fix { 2 :: 0 < x && x == y && y < 5 }
+fun foo4 x y = not (x <= y)
+fun foo5 x = x < (3 + 4)

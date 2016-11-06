@@ -1,0 +1,11 @@
+fun foo x = 
+    (case x of 
+     | 1 % [] -> True
+     | 10 % _ -> False
+     end) &&
+    (case x of 
+     | 1 % [] -> True
+     | 10 % _ -> False
+     end)
+
+  

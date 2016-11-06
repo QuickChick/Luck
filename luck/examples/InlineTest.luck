@@ -1,0 +1,6 @@
+fun foo x y = 
+   case (x,y) of 
+     | ([], _) -> True
+     | (_, (h:t)) -> h > 0 
+     | _ -> False
+   end

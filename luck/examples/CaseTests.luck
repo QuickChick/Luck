@@ -1,0 +1,17 @@
+fun foo x = 
+    case x of 
+    | [] -> True
+    | h:t -> False
+    end
+
+fun bar x = 
+    case x of 
+    | [] -> False
+    | h:t -> h
+    end
+
+fun baz x = 
+    case x of 
+    | 1 % [] -> True
+    | 9 % h:t -> h && baz t
+    end

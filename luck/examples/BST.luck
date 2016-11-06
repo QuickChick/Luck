@@ -1,0 +1,12 @@
+data Tree a = Leaf | Node a (Tree a) (Tree a)
+
+sig isBST :: Tree Int -> Int -> Int -> Bool
+fun isBST tree low high = 
+    case tree of 
+    | 1 % Leaf -> True
+    | 4 % Node x l r -> (low < x && x < high) !x 
+                        && isBST l low x 
+                        && isBST r x high
+    end
+
+fun test tree = isBST tree (-10) 10

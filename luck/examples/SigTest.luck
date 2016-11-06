@@ -1,0 +1,5 @@
+data A = B | C
+
+sig foo :: Int -> Bool
+fun foo x = True
+
