@@ -25,19 +25,13 @@ import Common.Types
 
 import Debug.Trace
 
--- | Primes (@'@) mark an intermediate representation of types that
--- distinguishes rigid variables from flexible ones.
-data TyVarId' = Flexible TyVarId
-              | Rigid TyVarId
-  deriving (Eq, Ord, Show)
-
 instance PP TyVarId' where
   pp (Flexible v) = pp v
   pp (Rigid v) = PP.text "R!" <> pp v
 
-type OTcType' = TcType TyConId TyVarId'
-type OScheme' = Scheme TyConId TyVarId'
-type OTcEnv' = TcEnv VarId ConId TyConId TyVarId'
+unPrimeTyVarId :: TyVarId' -> TyVarId
+unPrimeTyVarId (Flexible v) = v 
+unPrimeTyVarId (Rigid v) = v
 
 -- * Type checking state monad
 
@@ -49,7 +43,8 @@ type TcMonad a = WriterT [Constraint]
 data Constraint = Equal OTcType' OTcType' String deriving (Eq, Show)
 
 data TcState = TcState { freshNum :: !Int
-                       , _tcEnv   :: OTcEnv' }
+                       , _tcEnv   :: OTcEnv' 
+                       }
              deriving (Eq, Show)
 
 makeLenses ''TcState
@@ -65,6 +60,7 @@ putTc = modifyTc . const
 
 modifyTc :: (OTcEnv' -> OTcEnv') -> TcMonad ()
 modifyTc = modify . over tcEnv
+
 
 -- | Runs a computation, then resets the state to its initial value.
 localTc :: TcMonad a -> TcMonad a
@@ -98,91 +94,110 @@ equate :: OTcType' -> OTcType' -> String -> TcMonad ()
 equate t1 t2 s | t1 == t2  = return ()
                | otherwise = tell [Equal t1 t2 s]
 
-equateTyMaybe :: Maybe Exp -> TcMonad ()
-equateTyMaybe Nothing = return ()
+equateTyMaybe :: Maybe Exp -> TcMonad (Maybe Exp)
+equateTyMaybe Nothing = return Nothing
 equateTyMaybe (Just e) = do
-  t <- inferTy e
+  (e',t) <- inferTy e
+  -- TODO: Should this return updated exp? Disallowing typeclasses in weights seems ok
   equate tc_int_tycon t $ show ("Disj/weight", e)
+  return (Just e')
 
-inferTy :: Exp -> TcMonad OTcType'
-inferTy (Var x) = tcLookupVar x >>= instantiate
-inferTy (Con c) = tcLookupCon c >>= instantiate
-inferTy (Lit lit) = inferLit lit
+inferTy :: Exp -> TcMonad (Exp, OTcType')
+inferTy (Var (x, _)) = do 
+  tx <- tcLookupVar x >>= instantiate
+  return (Var (x, Just tx), tx)
+inferTy (Con c) = tcLookupCon c >>= (((Con c,) <$>) . instantiate)
+inferTy (Lit lit) = (Lit lit,) <$> inferLit lit
 inferTy (Unop op e) = do
   to <- inferOp1 op
-  te <- inferTy e
+  (e', te) <- inferTy e
   equate to te $ show ("Unop", op, e)
-  return to
+  return (Unop op e', to)
 inferTy (Conj e1 e2) = do
-  t1 <- inferTy e1
-  t2 <- inferTy e2
+  (e1', t1) <- inferTy e1
+  (e2', t2) <- inferTy e2
   equate tc_bool_tycon t1 $ show ("Conj-1", e1)
   equate tc_bool_tycon t2 $ show ("Conj-2", e2)
-  return tc_bool_tycon
+  return (Conj e1' e2', tc_bool_tycon)
 inferTy (Disj ne1 e1 ne2 e2) = do
-  equateTyMaybe ne1
-  equateTyMaybe ne2
-  t1 <- inferTy e1
-  t2 <- inferTy e2
+  ne1' <- equateTyMaybe ne1
+  ne2' <- equateTyMaybe ne2
+  (e1', t1) <- inferTy e1
+  (e2', t2) <- inferTy e2
   equate tc_bool_tycon t1 $ show ("Disj-1", e1)
   equate tc_bool_tycon t2 $ show ("Disj-2", e2)
-  return tc_bool_tycon
+  return (Disj ne1' e1' ne2' e2', tc_bool_tycon)
 inferTy (Binop e1 op e2) = do
   (t1, t2, tr) <- inferOp2 op
-  t1' <- inferTy e1
-  t2' <- inferTy e2
+  (e1', t1') <- inferTy e1
+  (e2', t2') <- inferTy e2
   equate t1 t1' $ show ("Binop", op, e1)
   equate t2 t2' $ show ("Binop", op, e2)
-  return tr
+  return (Binop e1' op e2', tr)
+inferTy (Fun vs e) = do
+  m <- getTc
+  tvs <- mapM (const $ Flexible <$> fresh) vs
+  tr <- Flexible <$> fresh
+  let assoc = Map.fromList . zip (map fst vs) $ Forall Set.empty <$> TcVar <$> tvs
+  (e', tr') <- localTc $ do
+    putTc m{varEnv = assoc `Map.union` varEnv m}
+    inferTy e
+  equate (TcVar tr) tr' $ "unnamed fun " ++ show (vs, e)
+  putTc m
+  return (Fun vs e', funify tvs tr)
 inferTy (App e1 e2) = do
-  t1 <- inferTy e1
-  t2 <- inferTy e2
+  (e1', t1) <- inferTy e1
+  (e2', t2) <- inferTy e2
   tv <- TcVar <$> Flexible <$> fresh
   equate t1 (TcFun t2 tv) $ show ("App", e1, e2)
-  return tv
+  return (App e1' e2', tv)
 inferTy (If e1 e2 e3) = do
-  t1 <- inferTy e1
-  t2 <- inferTy e2
-  t3 <- inferTy e3
+  (e1', t1) <- inferTy e1
+  (e2', t2) <- inferTy e2
+  (e3', t3) <- inferTy e3
   equate t1 tc_bool_tycon $ show ("If1", e1)
   equate t2 t3 $ show ("If23", e2, e3)
-  return t2
+  return (If e1' e2' e3', t2)
 inferTy (Case e alts) = do
-  t <- inferTy e
-  ts <- mapM (inferTyAlt t) alts
+  (e', t) <- inferTy e
+  (alts', ts) <- unzip <$> mapM (inferTyAlt t) alts
   case ts of
     x:xs -> do
       forM_ xs $ \x' -> equate x x' $ show ("Pat Res", x, x')
-      return x
+      return (Case e' alts', x)  
     _    -> error "Empty branch"
-
-inferTy (Let binds e) = localTc $ do
-    inferTyDecls binds
-    inferTy e
-inferTy (Fix e) = inferTy e 
-inferTy (FixN n e) = inferTy e 
+--inferTy (Let binds e) = localTc $ do
+--    inferTyDecls binds
+--    inferTy e
+--inferTy (Fix e) = inferTy e 
+--inferTy (FixN n e) = inferTy e 
 inferTy (Fresh x t en e) = do
   -- en denotes an integer expression
-  tn <- inferTy en
+  (en', tn) <- inferTy en
   equate tn tc_int_tycon $ show ("Fresh", en, "Int")
   -- x is a fresh variable of type t. 
   -- TODO: What about polymorphic/rigid/flexible?
   modifyTc $ \m -> m{varEnv = Map.insert x (Forall Set.empty $ Rigid <$> t) (varEnv m)}
-  inferTy e 
+  (e', t') <- inferTy e 
+  return (Fresh x t en' e', t')
 inferTy (Inst e x) = do 
-  t <- inferTy e 
+  (e', t) <- inferTy e 
   tx <- tcLookupVar x >>= instantiate 
   equate tx tc_int_tycon $ show ("Inst", x, tx)
-  return t
+  return (Inst e' x, t)
 inferTy (Collect e1 e2) = do 
-  _ <- inferTy e1 
-  inferTy e2
-inferTy (TRACE _ e) = inferTy e
+  (e1', _)  <- inferTy e1 
+  (e2', t2) <- inferTy e2
+  return (Collect e1' e2', t2)
+inferTy (TRACE x e) = do 
+  (e',t)  <- inferTy e
+  return (TRACE x e', t)
 
-inferTyAlt :: OTcType' -> Outer.AST.Alt -> TcMonad OTcType'
-inferTyAlt t (Outer.AST.Alt _loc _weight p e) = localTc $ do
+inferTyAlt :: OTcType' -> Outer.AST.Alt -> TcMonad (Outer.AST.Alt, OTcType')
+inferTyAlt t (Outer.AST.Alt loc weight p e) = localTc $ do
   inferTyPat t p
-  inferTy e
+  (e', t) <- inferTy e
+  return (Outer.AST.Alt loc weight p e', t)
 
 inferTyPat :: OTcType' -> Pat -> TcMonad ()
 inferTyPat t (PVar x) = modifyTc $ \m ->
@@ -209,7 +224,7 @@ tcAppify cid vars ts = mkFun ts $ TcCon cid (length vars) (map TcVar vars)
 funify :: [v] -> v -> TcType c v
 funify xs r = mkFun (TcVar <$> xs) (TcVar r)
 
-dataDecl, sigDecl, funDecl :: Decl -> TcMonad ()
+dataDecl, sigDecl, classDecl :: Decl -> TcMonad ()
 
 -- | Add user-defined types to the environment.
 -- TODO: Check well-formedness of type definitions.
@@ -243,7 +258,8 @@ dataDecl _ = return ()
 -- it is provided. Functions that do not have a signature can
 -- be recognized from their type @Forall [] v@ where @v@ is just a
 -- /flexible/ type variable.
-sigDecl (TypeSig loc f ty) = do
+-- | TODO: should it do something about class constraints?
+sigDecl (TypeSig loc f bindings ty) = do
   tcEnv <- getTc
   case Map.lookup f $ varEnv tcEnv of
     Just (Forall _ (TcVar (Flexible _))) ->
@@ -254,7 +270,7 @@ sigDecl (TypeSig loc f ty) = do
           vs = fv ty'
           sch = Forall vs ty'
       putTc $ tcEnv{varEnv = Map.insert f sch $ varEnv tcEnv}
-sigDecl (FunDecl _ f _ _) = do
+sigDecl (FunDecl _ f _ _ _) = do
   tcEnv <- getTc
   case Map.lookup f $ varEnv tcEnv of
     Just _ -> return ()
@@ -264,33 +280,83 @@ sigDecl (FunDecl _ f _ _) = do
       putTc $ tcEnv{varEnv = Map.insert f sch $ varEnv tcEnv}
 sigDecl _ = return ()
 
+-- Handle a class (basically signatures for the bindings)
+classDecl (ClassDecl loc cid cty binds) = 
+  forM_ binds $ \(fid, ty) -> do 
+    tcEnv <- getTc
+    -- check that fv cty = fv ty'?
+    let ty' = Flexible <$> ty
+        vs = fv ty'
+        sch = Forall vs ty'
+--    traceShowM ("Registering ", fid, sch)
+    putTc $ tcEnv{varEnv = Map.insert fid sch $ varEnv tcEnv}
+    -- Add an empty binding for the function "fid" in the REnv
+    -- (Ensures that we can identify which functions are typeclass-based, fast)
+--    registerClassFun fid
+classDecl _ = return ()
+
+instanceDecl, funDecl :: Decl -> TcMonad Decl
+-- | Do type inference on instance definitions
+-- Before handling exactly as a function need to unify 
+-- tyvar in   class X tyvar
+-- with
+-- ty in      instance {... =>} X ty
+instanceDecl (InstanceDecl loc cid ty ctrs binds) = do
+  binds' <- forM binds $ \(fid, args, exp,_) -> do
+    tcEnv <- getTc
+    -- simulating instantiation
+    let (Forall vs fty') = varEnv tcEnv Map.! fid
+        [v] = Set.toList vs
+    w <- (const $ TcVar <$> Flexible <$> fresh) v
+    equate w (Rigid <$> ty) $ "instance " ++ cid
+    let fty = subst (mkSub [v] [w]) fty'
+    tvs <- mapM (const $ Flexible <$> fresh) args
+    tr <- Flexible <$> fresh
+    equate fty (funify tvs tr) $ "fun " ++ fid
+    let assoc = Map.fromList . zip (map fst args) $ Forall Set.empty <$> TcVar <$> tvs
+    (exp', tr') <- localTc $ do
+      putTc tcEnv{varEnv = assoc `Map.union` varEnv tcEnv}
+      inferTy exp
+    equate (TcVar tr) tr' $ "fun " ++ fid
+    -- Restore type environment
+    putTc tcEnv
+    return (fid, args, exp', Just fty)
+  return (InstanceDecl loc cid ty ctrs binds')
+    -- Register new type in REnv (sticks after restore!) 
+    -- The expression should also be class/inlined
+--    registerInstance fid args exp' fty
+instanceDecl d = return d
+
 -- | Do type inference on a (recursive) function declaration
 -- Get fresh variables for all arguments and result
 -- Equate function with the functional type comprised of the fresh variables
 -- Fully extend the environment to infer the type of e
 -- Equate the result with the fresh variable for the result
 -- Return the type variable that corresponds to the function
-funDecl (FunDecl _loc f args e) = do
+funDecl d@(FunDecl loc f args e _) = do
   m <- getTc
   fty <- rigidify $ varEnv m Map.! f
   tvs <- mapM (const $ Flexible <$> fresh) args
   tr <- Flexible <$> fresh
   equate fty (funify tvs tr) $ "fun " ++ f
   let assoc = Map.fromList . zip (map fst args) $ Forall Set.empty <$> TcVar <$> tvs
-  tr' <- localTc $ do
+  (e',tr') <- localTc $ do
     putTc m{varEnv = assoc `Map.union` varEnv m}
     inferTy e
   equate (TcVar tr) tr' $ "fun " ++ f
   putTc m
-funDecl _ = return ()
+  return (FunDecl loc f args e' (Just fty))
+funDecl d = return d
 
 -- | Work in several passes, so that functions can all call each other
 -- and have access to all defined types.
-inferTyDecls :: [Decl] -> TcMonad ()
+inferTyDecls :: [Decl] -> TcMonad [Decl]
 inferTyDecls prg = do
   mapM_ dataDecl prg
   mapM_ sigDecl prg
-  mapM_ funDecl prg
+  mapM_ classDecl prg
+  prg' <- mapM instanceDecl prg
+  mapM funDecl prg'
 
 -- | Returns the type of the literal
 inferLit :: Literal -> TcMonad OTcType'
@@ -402,18 +468,46 @@ solve cs =
               return (s2 `after` s1)
           ) emptySub cs
 
-typeInference :: Prg -> Either Message OTcEnv
+substExp :: Substitution -> Exp -> Exp
+substExp s (Var (x, Just t)) = Var (x, Just $ subst s t)
+substExp s (Var (x, Nothing)) = Var (x, Nothing)
+substExp s (Con c) = Con c
+substExp s (Lit l) = Lit l
+substExp s (Unop op e) = Unop op $ substExp s e
+substExp s (Conj e1 e2) = Conj (substExp s e1) (substExp s e2)
+substExp s (Disj me1 e1 me2 e2) = Disj (substExp s <$> me1) (substExp s e1)
+                                       (substExp s <$> me2) (substExp s e2)
+substExp s (Binop e1 op e2) = Binop (substExp s e1) op (substExp s e2)
+substExp s (App e1 e2) = App (substExp s e1) (substExp s e2)
+substExp s (If e1 e2 e3) = If (substExp s e1) (substExp s e2) (substExp s e3)
+substExp s (Case e alts) = Case (substExp s e) (map (substAlt s) alts)
+substExp s (Fun vars e) = Fun vars (substExp s e) 
+substExp s (Fresh x t e1 e2) = Fresh x t (substExp s e1) (substExp s e2)
+substExp s (Inst e x) = Inst (substExp s e) x
+substExp s (TRACE x e) = TRACE x (substExp s e)
+substExp s (Collect e1 e2) = Collect (substExp s e1) (substExp s e2)
+
+substAlt s (Outer.AST.Alt loc weight pat e) = Outer.AST.Alt loc weight pat (substExp s e)
+
+substDcl :: Substitution -> Decl -> Decl
+substDcl s (FunDecl loc f args e mt) = FunDecl loc f args (substExp s e) (subst s <$> mt)
+substDcl s (InstanceDecl loc cid ty ctrs binds) = 
+    InstanceDecl loc cid ty ctrs (map (\(a,b,e,mt) -> (a,b, substExp s e, subst s <$> mt)) binds)
+substDcl s d = d
+
+typeInference :: Prg -> Either Message (Prg, OTcEnv)
 typeInference p =
-    case runTc initOTcEnv (inferTyDecls p >> getTc) of
+    case runTc initOTcEnv (inferTyDecls p >>= (\p' -> (p',) <$> getTc)) of
       Left err -> Left err
-      Right (tcEnv,c) -> do
+      Right ((p', tcEnv), c) -> do
         s <- solve c
+        let p'' = map (substDcl s) p'
         let TcEnv varEnv' conEnv' conIxs tyConEnv' = tcEnv
-        return $ TcEnv
+        return $ (p'', TcEnv
           { varEnv = generalizeMap $ substEnv s varEnv'
           , conEnv = generalizeMap conEnv'
           , conIndices = conIxs
-          , tyConEnv = generalizeMap' tyConEnv' }
+          , tyConEnv = generalizeMap' tyConEnv' })
   where
     generalizeVar (Flexible v) = v
     generalizeVar (Rigid v) = v
@@ -479,3 +573,9 @@ oBuiltIn = BuiltIn
   , biUnit = "()"
   }
 
+removeClassBindings :: Prg -> OTcEnv -> OTcEnv
+removeClassBindings prg (TcEnv ve ce ci tce) = TcEnv ve' ce ci tce 
+  where ve' = foldr handleDecl ve prg
+        handleDecl (ClassDecl _ _ _ binds) ve = 
+            foldr (\(fid, _) acc -> Map.delete fid acc) ve binds
+        handleDecl _ ve = ve

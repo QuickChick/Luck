@@ -1,0 +1,13 @@
+record Foo a = { foo :: a 
+               ; bar :: Int
+               }
+
+sig test :: Foo Int -> Bool
+fun test x = 
+    case x of 
+      | MkFoo a b -> a == b 
+    end 
+
+sig test2 :: Foo Int -> Bool    
+fun test2 x = foo x == bar x
+

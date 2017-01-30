@@ -1,0 +1,18 @@
+class Eq a where
+  eq :: a -> a -> Bool
+
+instance Eq Int where
+  eq x y = x == y
+
+sig eq_list :: {Eq a} => [a] -> [a] -> Bool
+fun eq_list x y = 
+    case (x,y) of 
+      | ([], []) -> True
+      | (hx:xs, hy:ys) -> eq hx hy && eq_list xs ys
+      | _ -> True
+    end
+
+instance Eq a => Eq [a] where
+  eq x y = eq_list x y
+
+fun test_int x y = eq [x,17] [42, y]

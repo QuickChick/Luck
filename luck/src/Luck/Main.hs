@@ -6,7 +6,7 @@ module Luck.Main where
 import Control.Monad
 import Control.Monad.Random
 
-import Common.Pretty (prettyPrint)
+import Common.Pretty (render, prettyPrint, pp)
 import Common.SrcLoc
 import Common.Util
 import Common.Types hiding (subst)
@@ -14,14 +14,18 @@ import Common.Conversions (convertToCore, CoreTranslation(..), iBuiltIn)
 import Outer.Parser
 import Outer.ParseMonad
 import Outer.Renamer(rename)
-import Outer.Types(typeInference)
+import Outer.Types(typeInference, removeClassBindings)
 import Outer.Expander(expandWildcards)
+import Outer.ClassMono(monomorphiseClasses)
 
 import Core.AST
+import qualified Outer.AST as OAST
 import Core.CSet
 import Core.Semantics hiding (rename)
 import Core.Optimizations
 import Core.Pretty
+
+import Debug.Trace
 
 import Paths_luck
 
@@ -29,6 +33,7 @@ import System.Environment
 import System.Random
 import System.Console.CmdArgs
 import System.Exit
+import qualified System.FilePath as FN
 
 import Data.Functor.Identity
 import Data.Map(Map)
@@ -106,17 +111,42 @@ main = do
   preludePath <- preludeLuck
   prelude <- BS.readFile preludePath
   contents <- BS.readFile _fileName
-  parse flags prelude contents (runModeReturns _runMode)
+  let relativePath = FN.takeDirectory _fileName
+  ast <- parseFiles flags relativePath prelude contents
+  parse flags ast (runModeReturns _runMode)
 
-parse :: Monad m => Flags -> BS.ByteString -> BS.ByteString -> Returns m a -> m a
-parse Flags{..} prelude contents r = do
+handleIncludes :: String -> OAST.Decl -> IO [OAST.Decl]
+handleIncludes relPath (OAST.IncludeDecl fileName) = do
+    newFile <- BS.readFile (relPath FN.</> (fileName ++ ".luck"))
+    let pState = mkPState newFile (SrcLoc fileName 1 1)
+    newAst <- failEither $ runP parser pState 
+    handleAllInclusions relPath newAst
+handleIncludes _ x = return [x]
+
+handleAllInclusions :: String -> [OAST.Decl] -> IO [OAST.Decl]
+handleAllInclusions relPath l = concat <$> mapM (handleIncludes relPath) l
+
+parseFiles Flags{..} relativePath prelude contents = do
   astPrelude <- failEither $ runP parser $ mkPState prelude (SrcLoc "Prelude" 1 1)
   let pState = mkPState contents (SrcLoc _fileName 1 1)
   astOriginal <- failEither $ runP parser pState
-  (fwdRenMap, revRenMap, astRenamed) <- failEither $ rename (astPrelude ++ astOriginal)
-  tcEnv <- failEither $ typeInference astRenamed
+  astIncluded <- handleAllInclusions relativePath astOriginal
+  return (astPrelude ++ astIncluded)
+
+parse :: Monad m => Flags -> OAST.Prg -> Returns m a -> m a
+parse Flags{..} ast r = do
+  (fwdRenMap, revRenMap, astRenamed) <- failEither $ rename ast
+--  traceM $ unlines (map show astRenamed)
+  (astAnnotated, tcEnv') <- failEither $ typeInference astRenamed
+--  traceM $ unlines (map show astAnnotated)
+  (astClass, tcEnv'') <- failEither $ monomorphiseClasses astAnnotated tcEnv'
+--  traceM $ unlines (map show astClass)
+  let tcEnv = removeClassBindings astAnnotated tcEnv''
+--  traceShowM ("TC:", tcEnv)
+--  traceM $ unlines ("DeClassed:" : map show astClass)
   -- TODO: -42..42 needs to *at least* be parameterized
-  astExpanded <- failEither $ expandWildcards astRenamed tcEnv (-42) 42
+  astExpanded <- failEither $ expandWildcards astClass tcEnv (-42) 42
+--  traceM $ unlines ("EXPANDED:" : map show astExpanded)
   coreResult <- failEither $ convertToCore fwdRenMap tcEnv astExpanded _defDepth
   let topFuns = gatherTopFuns $ ct_prog coreResult
       toFItem (fid, args, e) = (fid, FItem args e)
@@ -165,6 +195,7 @@ parse Flags{..} prelude contents r = do
       convert' TProxy2 [x, y] = (convert_ x, convert_ y)
       convert' TProxy3 [x, y, z] = (convert_ x, convert_ y, convert_ z)
       convert' _ _ = error "convert': arity mismatch"
+
 --  putStrLn $ show (idx0+1, step)
 --  forM_ (Map.assocs fenvFinal) $ \(fid, FItem args e) -> do
 --      putStrLn $ (((ct_vRev coreResult) ! fid) ++ " : ")
@@ -176,6 +207,7 @@ parse Flags{..} prelude contents r = do
       g <- getStdGen
       case run g of
         Right (_,k') -> do
+--          traceShowM ("Ran", k')
           (k'', vs) <- finalize k'
           Rigidify.ppBindings _fullOutput oArgs (oValues vs)
         Left err -> error err

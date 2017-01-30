@@ -70,6 +70,9 @@ rename vars idx (Fix e) =
     Fix (rename vars idx e)
 rename vars idx (FixN n e) = 
     FixN n (rename vars idx e)
+rename vars idx (Fun vs e) =
+    let vs' = map (first (second (+idx))) vs in
+    Fun vs' (rename (Set.union vars (Set.fromList (map (fst . fst) vs))) idx e)
 rename vars idx (Fresh (x,m) en e) = 
     let vars' = Set.insert x vars in
     -- en is renamed with vars (not ') although it doesn't make a difference
@@ -145,12 +148,13 @@ inlineExp (Binop e1 op e2) = liftM3 Binop (inlineExp e1) (pure op) (inlineExp e2
 inlineExp (If e1 e2 e3) = liftM3 If (inlineExp e1) (inlineExp e2) (inlineExp e3)
 inlineExp (ADT c es) = liftM (ADT c) (mapM inlineExp es)
 inlineExp (Case e alts) = liftM2 Case (inlineExp e) (mapM inlineAlt alts)
+inlineExp (Fun vs e) = Fun vs <$> inlineExp e
 inlineExp (Fix e) = liftM (Fix) (inlineExp e)
 inlineExp (FixN n e) = liftM (FixN n) (inlineExp e)
 inlineExp (Inst e u) = liftM2 Inst (inlineExp e) (pure u)
 inlineExp (Fresh x en e) = liftM2 (Fresh x) (inlineExp en) (inlineExp e)
 inlineExp (TRACE v e) = liftM2 TRACE (inlineExp v) (inlineExp e)
-inlineExp (Call fid es) = do
+inlineExp (Call (Var fid) es) = do
   rs <- ask
   b <- (_pred rs) fid
   if b then do
@@ -169,7 +173,9 @@ inlineExp (Call fid es) = do
     body' <- withAdjustedR fid $ inlineExp replaced
 --    traceM $ "Returning body: " ++ printExp (_vrev rs) (_crev rs) body'
     return body'
-  else Call fid <$> mapM inlineExp es -- TODO: this might not be sane :)
+  else Call (Var fid) <$> mapM inlineExp es -- TODO: this might not be sane :)
+inlineExp (Call f es) = return (Call f es) -- TODO: optimize
+inlineExp e = error $ show e
 
 inlineAlt :: Alt -> Inliner Alt 
 inlineAlt (Alt loc w p e) = liftM3 (Alt loc) (inlineExp w) (pure p) (inlineExp e)
@@ -248,6 +254,7 @@ compute (If e1 e2 e3) = do
   else return $ If e1' e2' e3'
 compute (ADT c es) = liftM (ADT c) $ mapM compute es
 compute (Call f es) = liftM (Call f) $ mapM compute es
+compute (Fun vs e) = return $ Fun vs e
 compute (Case e alts) = do
 --    traceM $ "Computing in case" ++ show e
     let def = Case <$> compute e <*> mapM computeAlt alts 
@@ -337,7 +344,11 @@ functionFilter p (Inst e u) = functionFilter p e
 functionFilter p (Fresh x en e) = 
     functionFilter p en || functionFilter p e
 functionFilter p (TRACE v e) = functionFilter p v || functionFilter p e
-functionFilter p (Call fid es) 
+functionFilter p (Fun vars e) = p (-1,-1) 
+functionFilter p (Call (Fun vars e) es) 
+    | p (-1, -1) = True
+    | otherwise = any (functionFilter p) (e : es)
+functionFilter p (Call (Var fid) es) 
     | p fid = True
     | otherwise = any (functionFilter p) es
 

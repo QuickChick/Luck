@@ -29,10 +29,11 @@ ppExp v c (Inst e u) = text "Inst " <+> ppExp v c e <+> text (prettyU u v)
 ppExp v c (Fresh u en e) = text ("Fresh " ++ prettyU u v ++ " :: ") <+> ppExp v c en <+> text " in " <+> ppExp v c e
 ppExp v c (Fix e) = text "Fix " <+> ppExp v c e
 ppExp v c (FixN n e) = text "FixN " <+> int n <+> ppExp v c e
+ppExp v c (Fun vs e) = text "Fun" <+> hcat (map (text . show . fst) vs) <+> (ppExp v c e)
 -- Trace 
 -- Collect 
-ppExp v c (Call f es) = text (v ! f) $$ (nest 2 $ vcat (map (ppExp v c) es))
-
+ppExp v c (Call (Var f) es) = text (v ! (fst f, 0)) $$ (nest 2 $ vcat (map (ppExp v c) es))
+ppExp v c (Call e es) = ppExp v c e $$ (nest 2 $ vcat (map  (ppExp v c) es))
 ppAlt v c (Alt _ ew p e) = text "ALT {" <+> ppExp v c ew <+> text "} " <+> ppPat v c p $$ nest 2 (text " |-> " <+> ppExp v c e)
 
 ppPat v c PWild = char '_'

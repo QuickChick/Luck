@@ -44,7 +44,7 @@ library
                        utf8-string, bytestring, mtl >= 2.2.1, array,
                        containers, QuickCheck >= 2.7, random, MonadRandom,
                        rosezipper >= 0.1, lens >= 4.9.1, template-haskell, 
-                       transformers
+                       transformers, filepath
 
   other-modules:       Paths_luck
 
@@ -54,7 +54,7 @@ library
 
                        Outer.AST, Outer.Parser, Outer.Types,
                        Outer.Lexer, Outer.ParseMonad, Outer.Renamer,
-                       Outer.Expander
+                       Outer.Expander, Outer.ClassMono
 
                        Core.AST, Core.IntRep, Core.CSet,
                        Core.Semantics, Core.Pretty, Core.Optimizations

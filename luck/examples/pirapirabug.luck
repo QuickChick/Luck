@@ -1,0 +1,19 @@
+data ContractElement =
+  VariableDeclaration Int
+
+sig goodContractElement :: ContractElement -> Bool
+fun goodContractElement elm =
+  case elm of
+  | VariableDeclaration i -> i >= 0
+  end
+
+sig goodContractElements :: [ContractElement] -> Bool
+fun goodContractElements lst =
+  case lst of
+  | 1 % [] -> True
+  | 9 % h : t -> goodContractElement h && goodContractElements t
+  end
+
+sig main :: [ContractElement] -> Bool
+fun main lst =
+  goodContractElements lst

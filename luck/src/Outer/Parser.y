@@ -42,6 +42,7 @@ import Debug.Trace
     INT         { L _ (TInt _) }
     VARID       { L _ (TVar _) }
     CONID       { L _ (TCon _) }
+    STRING      { L _ (TStr _) }
     '()'        { L _ TUnit }
     '('         { L _ TLParen }
     ')'         { L _ TRParen }
@@ -66,6 +67,11 @@ import Debug.Trace
     'fix'       { L _ TFix }
     'fresh'     { L _ TFresh }
     'collect'   { L _ TCollect }
+    'include'   { L _ TInclude }
+    'class'     { L _ TClass }
+    'instance'  { L _ TInstance }
+    'where'     { L _ TWhere }
+    'record'    { L _ TRecord }
     
     '_'         { L _ TUnd }
     '::'        { L _ TCons }
@@ -87,6 +93,9 @@ import Debug.Trace
     '>='        { L _ TGe }
     '->'        { L _ TArrow }
     '|'         { L _ TBar }
+    '=>'        { L _ TFatArrow }
+    ';'         { L _ TSemiColon }
+    '.'         { L _ TColon }
 
 %% --Like yacc, we include %% here, for no real reason.
 
@@ -99,9 +108,45 @@ decls :: { [Decl] }
     | 'data' dataDecl decls  { $2 : $3 }
     | 'fun' funDecl   decls  { $2 : $3 }
     | 'sig' sigDecl   decls  { $2 : $3 }
+    | 'include' STRING decls  { (IncludeDecl (unSTRING $2)) : $3 }
+    | 'class' classDecl decls { $2 : $3 }
+    | 'instance' instanceDecl decls { $2 : $3 }
+    | 'record' recordDecl decls { $2 ++ $3 }
+
+instanceDecl :: { Decl }
+    : className 'where' funDecls { InstanceDecl (getLoc $2) (fst $1) (snd $1) [] (fromFunDecls $3) }
+    | classCtrs '=>' className 'where' funDecls { InstanceDecl (getLoc $2) (fst $3) (snd $3) $1 (fromFunDecls $5) }
+
+classCtrs :: { [(ClassId, OTcType)] }
+    : className { [$1] }
+    | '(' classCtrsComma ')' { $2 }
+
+classCtrsComma :: { [(ClassId, OTcType)] }
+    : className { [$1] }
+    | className ',' classCtrsComma  { $1 : $3 }
+
+className :: { (ClassId, OTcType) }
+    : CONID btype { (unCONID $1, $2) }
+
+classDecl :: { Decl }
+    : className 'where' sigDecls { ClassDecl (getLoc $2) (fst $1) (unType (snd $1)) (fromSigDecls $3) }
+
+sigDecls :: { [Decl] }
+    : sigDecl { [$1] }
+    | sigDecl ';' sigDecls { $1 : $3 }
 
 sigDecl :: { Decl }          
-    : VARID '::' type        { TypeSig (getLoc $1) (unVARID $1) $3 }
+    : VARID '::' type        { TypeSig (getLoc $1) (unVARID $1) [] $3 }
+    | VARID '::' '{' classCtrsComma '}' '=>' type { TypeSig (getLoc $1) (unVARID $1) $4 $7 }
+
+recordDecl :: { [Decl] }
+    : type '=' '{' accessors '}' {% do { (c,ts) <- checkDataHeader $1
+                                       ; l <- getSrcLoc 
+                                       ; return $ recordDeclaration l c ts $4 } }
+
+accessors :: { [(VarId, OTcType)] }
+    : VARID '::' type { [(unVARID $1, $3)] }
+    | VARID '::' type ';' accessors { (unVARID $1,$3) : $5 }
 
 -- | Single datatype declaration. Need to reverse conDecls
 dataDecl :: { Decl } 
@@ -144,6 +189,10 @@ type :: { OTcType }
     : btype '->' type         { TcFun $1 $3 }
     | btype                   { $1 }
 
+funDecls :: { [Decl] }
+    : funDecl { [$1] }
+    | funDecl ';' funDecls { $1 : $3 }
+
 funDecl :: { Decl } 
     : VARID vars '=' exp      {% do { l <- getSrcLoc
                                     ; checkValDef l (unVARID $1) $2 $4 } }
@@ -158,11 +207,12 @@ vars :: { [(VarId, Maybe Int)] }
 sexp :: { Exp } 
     : INT                     { Lit . LitInt $ unINT $1 }
     | CONID                   { Con $ unCONID $1 } 
-    | VARID                   { Var $ unVARID $1 }
+    | VARID                   { (Var (unVARID $1, Nothing)) }
     | '()'                    { Con "()" }
     | '(' exp ')'             { $2 }
     | '(' ccexps ')'          { appify (Con $ tuple_con_name $ length $2) $2 }
     | '[' exps ']'            { listify $2 }
+    | '(' 'fun' vars '->' exp ')' { Fun $3 $5 }
 
 exp :: { Exp } 
     : sexp                    { $1 } 
@@ -221,7 +271,7 @@ branches :: { [Alt] }
 branch :: { Alt }
     : '|' pat '->' exp     { Alt (getLoc $1) Nothing $2 $4 }
     | '|' VARID '%' pat '->' exp
-                           { Alt (getLoc $1) (Just (Var $ unVARID $2)) $4 $6 }
+                           { Alt (getLoc $1) (Just (Var (unVARID $2, Nothing))) $4 $6 }
     | '|' INT '%' pat   '->' exp
                            { Alt (getLoc $1) (Just (Lit (LitInt (unINT $2)))) $4 $6 }
     | '|' '%' exp '%' pat '->' exp
@@ -263,7 +313,10 @@ unVARID :: Located Token -> VarId
 unVARID t  = let (TVar i) = unLoc t in i
 
 unCONID :: Located Token -> TyConId
-unCONID t = let (TCon i) = unLoc t in i 
+unCONID t = let (TCon i) = unLoc t in i
+
+unSTRING :: Located Token -> String
+unSTRING t = let (TStr i) = unLoc t in i
 
 happyError :: (Located Token) -> P a
 happyError (L loc tok) = throwError $ mkParseError "" loc (show tok)
@@ -302,8 +355,31 @@ checkDataHeader (TcCon c _ ts) = return (c, map extractTVar ts)
 checkDataHeader _ = error "Illegal header declaration"
 
 checkValDef :: SrcLoc -> VarId -> [(VarId,Maybe Int)] -> Exp -> P Decl
-checkValDef s i is e = return $ FunDecl s i is e
+checkValDef s i is e = return $ FunDecl s i is e Nothing
 
+fromSigDecls :: [Decl] -> [(VarId, OTcType)]
+fromSigDecls = map (\(TypeSig _ v _ t) -> (v,t))
+
+--fromFunDecls :: [Decl] -> [(VarId, [(VarId, Maybe Int)], Exp, Maybe )]
+fromFunDecls = map (\(FunDecl _ v l e _) -> (v,l,e, Nothing))
+
+unType :: OTcType -> TyVarId
+unType (TcVar x) = x 
+unType _ = error "wtf/Parser.y"
+
+recordDeclaration :: SrcLoc -> TyConId -> [TyVarId] -> [(VarId, OTcType)] -> [Decl]
+recordDeclaration l c ts accessors = 
+  let (names, types) = unzip accessors
+      cname = "Mk" ++ c
+      patnames = zipWith (\i _ -> "_rec_n_" ++ show i) [1..] names
+      funs = zipWith (\i (fid, typ) -> 
+                       [ -- TypeSig l fid [] typ ,
+                         FunDecl l fid [("_rec", Nothing)] 
+                           (Case (Var ("_rec", Nothing)) [Alt noLoc Nothing (PApp cname (map PVar patnames))
+                                                          (Var ((patnames !! i), Nothing))])
+                           Nothing ]
+                     ) [0..] accessors
+  in concat $ [DataDecl l c ts [ConDecl cname types]] : funs 
 
 }
 

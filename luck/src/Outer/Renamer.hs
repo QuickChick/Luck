@@ -102,25 +102,36 @@ subsExp :: Map VarId VarId -> Exp -> Exp
 subsExp s e = runSubs s (renameExp e)
 
 renameSigs :: Decl -> Renamer ()
-renameSigs (TypeSig loc fid ty) = do 
+renameSigs (TypeSig loc fid _ ty) = do 
   _ <- fresh fid
   return ()
 renameSigs _ = return ()
 
 renameDecl :: Decl -> Renamer Decl
-renameDecl (FunDecl loc fid vars e) = do
+renameDecl (FunDecl loc fid vars e mt) = do
   rs <- get
   fid' <- case Map.lookup fid (env rs) of
     Nothing -> fresh fid
     Just f -> return f
   vars' <- mapM (\(a,b) -> (,b) <$> fresh a) vars
   e' <- renameExp e
-  return $ FunDecl loc fid' vars' e'
-renameDecl (TypeSig loc fid ty) = do
+  return $ FunDecl loc fid' vars' e' mt
+renameDecl (TypeSig loc fid ctrs ty) = do
   rs <- get
   case Map.lookup fid (env rs) of
     Nothing -> error "Sig not processed twice? (rename)"
-    Just fid' -> return $ TypeSig loc fid' ty
+    Just fid' -> return $ TypeSig loc fid' ctrs ty
+renameDecl d@(ClassDecl loc cid typ bindings) = do
+  bindings' <- mapM (\(a,b) -> (,b) <$> fresh a) bindings
+  return (ClassDecl loc cid typ bindings')
+renameDecl (InstanceDecl loc cid typ ctrs bindings) = do
+  bindings' <- mapM (\(fid, vars, e, mt) -> do
+                       fid' <- lookupVar fid
+                       vars' <- mapM (\(a,b) -> (,b) <$> fresh a) vars
+                       e' <- renameExp e
+                       return (fid', vars', e', mt)
+                    ) bindings
+  return (InstanceDecl loc cid typ ctrs bindings')
 renameDecl d = pure d
 
 renameAlt :: Alt -> Renamer Alt
@@ -142,7 +153,7 @@ renameMaybeExp (Just e) = do
   return $ Just e'
 
 renameExp :: Exp -> Renamer Exp 
-renameExp (Var x) = fmap Var $ lookupVar x
+renameExp (Var (x, _)) = lookupVar x >>= (\x' -> return $ Var (x', Nothing))
 renameExp (Con c) = pure $ Con c
 renameExp (Lit l) = pure $ Lit l            
 renameExp (Unop op e) = fmap (Unop op) $ renameExp e
@@ -160,6 +171,9 @@ renameExp (Case e alts) = do
   RS{env = env} <- get 
   alts' <- mapM (withEnv env . renameAlt) alts
   return $ Case e' alts'
+renameExp (Fun vs e) = do
+  vs' <- mapM (\(v,d) -> (,d) <$> fresh v) vs
+  Fun vs' <$> renameExp e
 renameExp (Let b e) = error "Implement renameExp"
 renameExp (Fix e) = Fix <$> renameExp e
 renameExp (FixN n e) = FixN n <$> renameExp e

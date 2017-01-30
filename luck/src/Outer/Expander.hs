@@ -62,7 +62,7 @@ expandWildcards prg tcEnv iMin iMax
       (Env tcEnv iMin iMax)
 
 expandDecl :: Decl -> Expand Decl
-expandDecl (FunDecl loc x xs e) = liftM (FunDecl loc x xs) (expand e)
+expandDecl (FunDecl loc x xs e mt) = liftM (\e -> FunDecl loc x xs e mt) (expand e)
 expandDecl d = return d
 
 expand :: Exp -> Expand Exp
@@ -73,6 +73,7 @@ expand (Binop e1 op e2) = liftM3 Binop (expand e1) (pure op) (expand e2)
 expand (App e1 e2) = liftM2 App (expand e1) (expand e2)
 expand (If e1 e2 e3) = liftM3 If (expand e1) (expand e2) (expand e3)
 expand (Case e alts) = join $ liftM2 expandCase (expand e) (mapM expandAlt alts)
+expand (Fun vs e) = Fun vs <$> expand e
 expand (Fix e) = Fix <$> expand e
 expand (FixN n e) = FixN n <$> expand e
 expand (Fresh x t en e) = Fresh x t <$> expand en <*> expand e
@@ -123,7 +124,7 @@ expandCase e alts@[Alt _ _ (PVar _) _] = return $ Case e alts
 expandCase e alts = do
     let (getVar, wrap) =
           case (e, findVar $ altPat <$> alts) of
-            (Var x, _) -> (return x, id)
+            (Var (x,_), _) -> (return x, id)
             (_, Nothing) -> (freshDNPVar, substituteCase e)
             (_, Just v) -> (return v, letE v e)
     v <- getVar
@@ -167,7 +168,7 @@ dNP (v : vs) pAlts
       Just c -> Almost $ do
         ctors <- getOtherCtors c
         (request, finish) <- runAlmost $ dNPPAlts vs ctors pAlts'
-        return (request, Case (Var v) . finish)
+        return (request, Case (Var (v, Nothing)) . finish)
 
 -- | We generalize the procedure to desugaring multiple patterns.
 -- Unwrapping nested patterns queues them up in LIFO order.

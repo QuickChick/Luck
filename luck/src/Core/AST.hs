@@ -54,11 +54,12 @@ data Exp = Var {unVar :: VarId}    -- ^ variable
          | Case Exp [Alt]          -- ^ case expression
          | Inst Exp Unknown        -- ^ instantiate an unknown after the expression
          | Fresh Unknown Exp Exp   -- ^ fresh unknown at some depth. TODO: Include type info?
+         | Fun [(VarId, Int)] Exp  -- ^ Lambdas
          | Fix Exp                 -- ^ fix a transformer on some unknowns
          | FixN Int Exp            -- ^ fix a transformer a certain number of times (opt)
          | TRACE Exp Exp
          | Collect Exp Exp 
-         | Call VarId [Exp]        -- ^ Fully applied function calls. TODO: Rethink
+         | Call Exp [Exp]          -- ^ Function call
            deriving (Eq, Ord, Show)
 
 -- | Alternatives in a case expression

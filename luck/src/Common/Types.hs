@@ -16,6 +16,11 @@ data TcType tyconid tyvarid = TcCon tyconid  Int [(TcType tyconid tyvarid)]
                           | TcVar tyvarid
               deriving (Eq, Ord, Show, Functor)
 
+fmap_tyvarid :: (tyvarid -> tyvarid') -> TcType tyconid tyvarid -> TcType tyconid tyvarid'
+fmap_tyvarid f (TcCon c n lst) = TcCon c n (map (fmap_tyvarid f) lst)
+fmap_tyvarid f (TcFun t1 t2) = TcFun (fmap_tyvarid f t1) (fmap_tyvarid f t2)
+fmap_tyvarid f (TcVar x) = TcVar (f x)
+
 data Scheme tyconid tyvarid = Forall (Set tyvarid) (TcType tyconid tyvarid)
             deriving (Eq, Show)
 

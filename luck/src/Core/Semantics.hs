@@ -26,6 +26,8 @@ import Data.Bifunctor(bimap)
 import Data.List(intersperse)
 import Data.Map(Map)
 import qualified Data.Map as Map
+import Data.Set(Set)
+import qualified Data.Set as Set
 
 import Control.Lens
 
@@ -73,7 +75,13 @@ runLuck = ((.) . (.) . (.) . (.) . (.) . (.)) (bimap show (\((x, _), _) -> x)) r
 runLuck' :: ReaderState -> FBState -> Exp -> Pat -> CtrSet -> StdGen ->
   Either Message (((Exp, CtrSet), FBState), StdGen)
 runLuck' rs fbs e w k g
-  = runRandT ?? g $ runStateT ?? fbs $ runReaderT ?? rs $ semantics e w k
+  = runRandT ?? g $ runStateT ?? fbs $ runReaderT ?? rs $ do 
+--      traceShowM ("Step is: ", _step fbs)
+--      debug (\v c -> printExp v c e) 
+      (e',k') <- semantics e w k
+--      debug (\v c -> printExp v c e')
+--      debug (\v c -> prettyPr k' v c)
+      return (e', k')
 
 -- Stupidity of the standard library
 liftCatch' :: Monad m => Catch e m (a,s) -> Catch e (RandT s m) a
@@ -109,6 +117,9 @@ freshen (u,_) = do
 increaseIdx :: Luck ()
 increaseIdx =  
   modify (\s -> s{_idx = _idx s + _step s})
+
+currentIndex :: Int -> Int -> Int -> Bool
+currentIndex idx step n = (n >= idx && n < idx + step)
 
 backtrack :: (Map VarId String -> Map ConId String -> String) -> [Luck a] -> Luck a
 backtrack s [] = do 
@@ -164,17 +175,23 @@ semantics e@(Binop e1 op2 e2) w@(PApp cid []) k
   | boolBinop op2 = do 
      rs <- ask 
      let (t, f) = (_conTrue rs, _conFalse rs)
+--     debug $ \v c -> printExp v c e1 
+--     debug $ \v c -> printExp v c e2
      (v1, k1) <- narrow e1 k 
      (v2, k2) <- narrow e2 k1
      if cid == t then do
+--       debug $ \v c -> prettyPr k v c 
+--       debug $ \v c -> printExp v c v1
+--       debug $ \v c -> printExp v c v2
 --       debug (\v c -> "Refining for: " ++ printFor k2 [v1, v2] v c)
+       
        -- TODO: Think about w there
-       k' <- luckNote "refiner" $ registerConstraint (_integerRange rs) (getCtr op2) v1 v2 k 
+       k' <- luckNote "refiner" $ registerConstraint (_integerRange rs) (getCtr op2) v1 v2 k2 
                                   --doRefine (refineWith (getRefiner op2)) w1 w2 k2
        return (ADT cid [], k')
      else do
        -- Opposite refiner
-       k' <- luckNote "refiner" $ registerConstraint (_integerRange rs) (getOpCtr op2) v1 v2 k
+       k' <- luckNote "refiner" $ registerConstraint (_integerRange rs) (getOpCtr op2) v1 v2 k2
                                   -- doRefine (refineWith (getOpRefiner op2)) w1 w2 k2
        return (ADT cid [], k')
 semantics e@(Binop e1 op2 e2) w k = do
@@ -206,26 +223,35 @@ semantics e@(ADT cid es) (PVar w) k = do
   (es', k'') <- foldM (\(res,k) (e,w) -> first (:res) <$> semantics e w k) ([], k') (zip es ws)
   return (ADT cid $ reverse es', k'')
 semantics e@(ADT _ _) PWild k = return (e, k)
-semantics (Call fid es) w k = do 
+semantics (Call (Var fid) es) w k = do 
   rs <- ask
---  debug $ \v c -> "Calling function" ++ v ! fid ++ " : " ++ concat (intersperse "\n" $ map (\e -> printExp v c e) es)
+--  debug $ \v c -> "Is this called? " ++ show fid
+--  debug $ \v c -> "Calling function" ++ v ! (fst fid,0) ++ " : " ++ concat (intersperse "\n" $ map (\e -> printExp v c e) es)
 --  debug $ \v c -> prettyPr k v c 
-  let (FItem args e) = _fMap rs ! fid
-  -- First rename ALL the variables in the body
-  (es',k') <- first reverse <$> foldM (\(acc,k) e -> do 
-                                        (v, k') <- semantics e PWild k
-                                        return (v:acc, k')
-                                      ) ([],k) es
-  increaseIdx
-  s <- get 
-  let eRenamed = rename (_idx s) e
-  -- Then replace the arguments in the body with the expressions
---  let es' = map (forceBinops k) es
-  let e' = subst eRenamed (map (\((x,_),_) -> (x,_idx s)) args) es'
---  debug $ \v c -> "Body of function is:\n " ++ printExp v c e' 
-  -- Finally call the semantics of the new body
-  semantics e' w k'
--- TODO: Optimize. semantics (Case (Unknown u) alts) w k = 
+  let (FItem args e) = _fMap rs ! (fst fid, 0)
+  semantics (Call (Fun args e) es) w k
+semantics (Call (Fun args e) es) w k = 
+  if length args == length es then do
+--    debug $ \v c -> "Calling anonymous " ++ (printExp v c e)
+--                    ++ " : " ++ concat (intersperse "\n" $ map (printExp v c) es)
+    (es',k') <- first reverse <$> foldM (\(acc,k) e -> do 
+--                                          debug $ \v c -> "Semantics for " ++ printExp v c e
+                                          (v, k') <- semantics e PWild k
+                                          return (v:acc, k')
+                                        ) ([],k) es
+    increaseIdx
+    -- First rename ALL the variables in the body
+    s <- get
+    let eRenamed = rename Set.empty (_idx s) e
+    -- Then replace the arguments in the body with the expressions
+  --  let es' = map (forceBinops k) es
+    let e' = subst eRenamed (map (\((x,_),_) -> (x,_idx s)) args) es'
+--    debug $ \v c -> "Body of function is:\n " ++ printExp v c e' 
+    -- Finally call the semantics of the new body
+    semantics e' w k'
+  else error "Implement partial application"
+-- TODO: Optimize. semantics (Case (Unknown u) alts) w k =
+semantics e@(Fun _ _) PWild k = return (e, k)
 semantics e@(Case d alts) w k = do
 --  debug $ \v c -> "In Case\n" ++ printExp v c d ++ "\n" ++ (concat $ intersperse "\n" $ map (printAlt v c) alts)
   rs <- ask
@@ -296,6 +322,7 @@ narrow (Binop e1 op2 e2) k = do
        (Lit n1) <- luckNote "singleton after instantiation" $ fromSingleton k'' (U u1)
        (Lit n2) <- luckNote "singleton after instantiation" $ fromSingleton k'' (U u2)
        return (Lit $ (getOp op2) n1 n2, k'')
+    _ -> error $ show (l1, l2)
 narrow e@(If e1 e2 e3) k = do 
   (v, k') <- narrow e1 k 
   rs <- ask
@@ -303,29 +330,37 @@ narrow e@(If e1 e2 e3) k = do
   case v of 
     ADT cid _ -> narrow (if cid == t then e2 else e3) k'
     Unknown u -> error "implement unknown boolean narrowing"
+    _ -> error $ show ("wtf: ", v)
 narrow (ADT cid es) k = 
   first (ADT cid . reverse) 
   <$> foldM (\(res,k) e -> first (:res) <$> narrow e k) ([],k) es
-narrow (Call fid es) k = do 
+narrow (Call (Var fid) es) k = do 
   rs <- ask
---  debug $ \v c -> "Calling function" ++ v ! fid ++ " : " ++ concat (intersperse "\n" $ map (\e -> printExp v c e) es)
---  debug $ \v c -> prettyPr k v c 
-  let (FItem args e) = _fMap rs ! fid
-  -- First rename ALL the variables in the body
-  (es',k') <- first reverse <$> foldM (\(acc,k) e -> do 
-                                        (v, k') <- narrow e k
-                                        return (v:acc, k')
-                                      ) ([],k) es
-  increaseIdx
-  s <- get 
-  let eRenamed = rename (_idx s) e
-  -- Then replace the arguments in the body with the expressions
---  let es' = map (forceBinops k) es
-  let e' = subst eRenamed (map (\((x,_),_) -> (x,_idx s)) args) es'
---  debug $ \v c -> "Body of function is:\n " ++ printExp v c e' 
-  -- Finally call the narrow of the new body
-  narrow e' k'
--- TODO: Optimize. narrow (Case (Unknown u) alts) w k = 
+--  debug $ \v c -> "Calling function (narrow) " ++ v ! (fst fid, 0) ++ " : " ++ concat (intersperse "\n" $ map (\e -> printExp v c e) es)
+  --  debug $ \v c -> prettyPr k v c 
+  let (FItem args e) = _fMap rs ! (fst fid, 0)
+  narrow (Call (Fun args e) es) k
+narrow (Call (Fun args e) es) k =
+  if length args == length es then do
+    -- First rename ALL the variables in the body
+    (es',k') <- first reverse <$> foldM (\(acc,k) e -> do 
+                                          (v, k') <- narrow e k
+                                          return (v:acc, k')
+                                        ) ([],k) es
+    increaseIdx
+    s <- get
+    let eRenamed = rename Set.empty (_idx s) e
+    -- Then replace the arguments in the body with the expressions
+  --  let es' = map (forceBinops k) es
+    let e' = subst eRenamed (map (\((x,_),_) -> (x,_idx s)) args) es'
+--    debug $ \v c -> "Body of function is:\n " ++ printExp v c e' 
+    -- Finally call the narrow of the new body
+    (rv,rk) <- narrow e' k'
+--    debug $ prettyPr rk
+    return (rv, rk)
+  -- TODO: Optimize. narrow (Case (Unknown u) alts) w k =
+  else error "Implement narrow for partial applications"
+narrow e@(Fun _ _) k = return (e, k)
 narrow e@(Case d alts) k = do
 --  debug $ \v c -> "In Case\n" ++ printExp v c d ++ "\n" ++ (concat $ intersperse "\n" $ map (printAlt v c) alts)
   rs <- ask
@@ -337,10 +372,14 @@ narrow e@(Case d alts) k = do
                     $ map (\(Alt _ _ pat e') -> do
                             let us = getUnknownsP pat
 --                            debug $ \v c -> "Handling branch: \n" ++ printExp v c d ++ "\n" ++  printPat v c pat
+--                            debug $ \v c -> prettyPr k v c
                             (_, k') <- semantics d pat k  
 --                            debug $ \v c -> "After narrow: \n" ++ printFor k' us v c
+--                            debug $ \v c -> prettyPr k' v c
                             let e'' = subst e' us (map Unknown us)
-                            narrow e'' k'
+                            (rv, rk) <- narrow e'' k'
+--                            debug $ \v c -> prettyPr rk v c 
+                            return (rv, rk)
                           ) alts
   -- not sure if backtracking is the correct choice here...
   backtrack (\v c -> "Backtracking... (CASE)" ++ printAltPats v c alts ) $ opts
@@ -392,41 +431,47 @@ getUnknownsP (PApp cid ps) =
 getUnknownsP (PLit n) = []
 getUnknownsP PWild = []
 
--- | Rename a body's variables (should have no unknowns) to an index
-rename :: Int -> Exp -> Exp
-rename idx (Var (x,0)) = Var (x, idx)
-rename idx (Var _) = error "Should this happen?" -- TODO: If optimizations break this, consider +
-rename idx (Unknown (x,m)) = error $ "Should this happen " ++ show (x, m)
-rename idx (Unop op e)  = Unop op (rename idx e)
-rename idx (Binop e1 op e2) = 
-    Binop (rename idx e1) op (rename idx e2)
-rename idx (If e1 e2 e3) = 
-    If (rename idx e1) (rename idx e2) (rename idx e3)
-rename idx (ADT cid exps) = 
-    ADT cid (map (rename idx) exps)
-rename idx (Call fid exps) = 
-    Call fid $ map (rename idx) exps
-rename idx (Case e alts) = 
-    Case (rename idx e) (map (renameAlt idx) alts)
-rename idx (Fix e) = 
-    Fix (rename idx e)
-rename idx (FixN n e) = 
-    FixN n (rename idx e)
-rename idx (Fresh (x,0) n e) = Fresh (x, idx) n (rename idx e)
-rename idx (Fresh _ _ _) = error "Should not happen"
-rename idx (Inst e (x,0)) = Inst (rename idx e) (x, idx)
-rename idx (Inst e _) = error "Should *this* happen?"
-rename _ (Lit x) = Lit x
-rename idx (TRACE e e') = TRACE (rename idx e) (rename idx e')
+-- | Rename a body's variables except for <set> (should have no unknowns) to an index
+rename :: Set Int -> Int -> Exp -> Exp
+rename vars idx (Var (x,m)) | Set.member x vars = Var (x,m)
+                            | otherwise = Var (x, m + idx) -- TODO: maybe add?
+--rename vars idx (Var (x,m)) = Var (x, m + idx)
+rename vars idx (Unknown (x,m)) = error $ "Should this happen " ++ show (x, m)
+rename vars idx (Unop op e)  = Unop op (rename vars idx e)
+rename vars idx (Binop e1 op e2) = 
+    Binop (rename vars idx e1) op (rename vars idx e2)
+rename vars idx (If e1 e2 e3) = 
+    If (rename vars idx e1) (rename vars idx e2) (rename vars idx e3)
+rename vars idx (ADT cid exps) = 
+    ADT cid (map (rename vars idx) exps)
+--rename vars idx (Call (Var fid) exps) = 
+--    Call (Var fid) $ map (rename vars idx) exps
+rename vars idx (Call f exps) = 
+    Call (rename vars idx f) $ map (rename vars idx) exps
+rename vars idx (Fun vs e) =
+    let vars' = Set.union vars (Set.fromList (map (fst . fst) vs)) in
+    Fun vs (rename vars' idx e)
+rename vars idx (Case e alts) = 
+    Case (rename vars idx e) (map (renameAlt vars idx) alts)
+rename vars idx (Fix e) = 
+    Fix (rename vars idx e)
+rename vars idx (FixN n e) = 
+    FixN n (rename vars idx e)
+rename vars idx (Fresh (x,m) n e) = Fresh (x, m + idx) n (rename vars idx e)
+--rename vars idx (Fresh _ _ _) = error "Should not happen"
+rename vars idx (Inst e (x,m)) = Inst (rename vars idx e) (x, m + idx)
+--rename vars idx (Inst e _) = error "Should *this* happen?"
+rename _ _ (Lit x) = Lit x
+rename vars idx (TRACE e e') = TRACE (rename vars idx e) (rename vars idx e')
 --rename vars idx x = error $ "Core/Interpreter/rename error - unhandled: "  ++ show x
 
-renameAlt :: Int -> Alt -> Alt
-renameAlt idx (Alt loc w p e) =
-    Alt loc (rename idx w) (renamePat idx p) (rename idx e)
+renameAlt :: Set Int -> Int -> Alt -> Alt
+renameAlt vars idx (Alt loc w p e) =
+    Alt loc (rename vars idx w) (renamePat idx p) (rename vars idx e)
 
 renamePat :: Int -> Pat -> Pat
-renamePat idx (PVar (x,0)) = PVar (x, idx)
-renamePat idx (PVar _) = error "Pat shouldnot happen"
+renamePat idx (PVar (x,m)) = PVar (x, m + idx)
+--renamePat idx (PVar (x,n)) = error $ "shouldnothappend: " ++ show (x,n)
 renamePat idx (PApp cid ps) = 
     PApp cid $ map (renamePat idx) ps
 renamePat idx p = p
@@ -435,7 +480,8 @@ subst :: Exp -> [VarId] -> [Exp] -> Exp
 subst e vs es = aux e 
   where m = Map.fromList $ zip vs es
         
-        aux (Var x) = 
+        aux (Var x) =
+--          traceShow ("aux/subst/var", x, m, Map.lookup x m) $
           case Map.lookup x m of 
             Just e' -> e'
             Nothing -> Var x 
@@ -456,10 +502,14 @@ subst e vs es = aux e
         aux (FixN n e) = FixN n (aux e)
         aux (TRACE e1 e2) = TRACE (aux e1) (aux e2)
         aux (Collect e1 e2) = Collect (aux e1) (aux e2)
-        aux (Call fid es) = 
+        aux (Call (Var fid) es) =
+--          traceShow ("aux/subst", fid) $ 
           case Map.lookup fid m of 
-            Just (Var f') -> Call f' $ map aux es
-            _ -> Call fid $ map aux es
+            Just (Var f') -> Call (Var f') $ map aux es
+            Just e -> Call e (map aux es)
+            _ -> Call (Var fid) $ map aux es
+        aux (Call f es) = Call f (map aux es)
+        aux (Fun vs e) = Fun vs (aux e)
 
         auxAlt (Alt l ew p e) = Alt l (aux ew) p (aux e) -- Nothing should be substituted in a pat
 

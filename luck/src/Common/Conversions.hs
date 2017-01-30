@@ -121,11 +121,11 @@ convert vrRev tcEnv decls defDepth cenv =
       Left err -> Left err
 
 freshDecl :: O.Decl -> Converter ()
-freshDecl (O.FunDecl _ fid _ _) = void (freshVar fid)
+freshDecl (O.FunDecl _ fid _ _ _) = void (freshVar fid)
 freshDecl _ = return ()
 
 convertDecl :: O.OTcEnv -> O.Decl -> Converter [I.Decl]
-convertDecl tcEnv (O.FunDecl loc fid vars e) = do 
+convertDecl tcEnv (O.FunDecl loc fid vars e _) = do 
   (fid',0) <- lookupVar fid
   vars' <- mapM (\(v,d) -> do 
                    v' <- freshVar v
@@ -170,8 +170,9 @@ convertOp2 O.OpGe    = I.OpGe
 flatten :: O.Exp -> (O.Exp, [O.Exp])
 flatten (O.App (O.Con c) e) = (O.Con c, [e])
 flatten (O.App (O.Var x) e) = (O.Var x, [e])
+flatten (O.App (O.Fun args e) e') = (O.Fun args e, [e'])
 flatten (O.App e1 e2) = second (++[e2]) (flatten e1)
-flatten _ = error "Incorrect argument to flatten/Conversions"
+flatten e = error ("Incorrect argument to flatten/Conversions" ++ show e)
 
 notMacro :: I.ConId -> I.ConId -> I.Exp -> I.Exp 
 notMacro t f e = 
@@ -197,7 +198,7 @@ orMacro u t f w1 w2 e1 e2 =
        ) ]
 
 convertExp :: (O.VarId -> Converter I.VarId) -> O.Exp -> Converter I.Exp 
-convertExp l (O.Var x) = I.Var <$> lookupVar x
+convertExp l (O.Var (x, _)) = I.Var <$> lookupVar x
 convertExp l (O.Con c) = liftM2 I.ADT (lookupCon c) (pure [])
 convertExp l (O.Lit (O.LitInt x)) = pure $ I.Lit x
 convertExp l (O.Unop O.OpNot e) = do
@@ -245,10 +246,14 @@ convertExp l (O.App e1 e2) =
       cid' <- lookupCon c
       es'  <- mapM (convertExp l) es
       return $ I.ADT cid' es'
-    (O.Var fid, es) -> do 
+    (O.Var (fid, _), es) -> do 
         fid' <- lookupFun fid
         es'  <- mapM (convertExp l) es
-        return $ I.Call fid' es'
+        return $ I.Call (I.Var fid') es'
+    (O.Fun args e, es) -> do 
+        fun <- convertExp l (O.Fun args e)
+        es' <- mapM (convertExp l) es
+        return $ I.Call fun es'
     _ -> error "Result of flatten incorrect/Conversions"
 convertExp l (O.If e1 e2 e3) = 
   liftM3 I.If (convertExp l e1) (convertExp l e2) (convertExp l e3) 
@@ -257,13 +262,22 @@ convertExp l (O.Case e alts) = do
   alts' <- mapM (convertAlt l) alts
   return $ I.Case e' (concat alts')
 convertExp l (O.Let b e) = error "Implement convertExp for Let"
+convertExp l (O.Fun vs e) = do
+  vars' <- forM vs $ \(v,d) -> do 
+                        v' <- freshVar v
+                        def <- defDepth <$> get
+                        case d of 
+                          Just n  -> return (v', n)
+                          Nothing -> return (v', def)
+  e' <- convertExp freshVar e
+  return $  I.Fun vars' e' 
 convertExp l (O.Fix e) = I.Fix <$> convertExp l e
 convertExp l (O.FixN n e) = I.FixN n <$> convertExp l e
 convertExp l (O.Inst e x) = 
   liftM2 I.Inst (convertExp l e) (lookupVar x)
 convertExp l (O.Fresh x t en e) = 
   liftM3 I.Fresh (freshVar x) (convertExp l en) (convertExp l e)
-convertExp l (O.TRACE x e) = liftM2 I.TRACE (convertExp l (O.Var x)) (convertExp l e)
+convertExp l (O.TRACE x e) = liftM2 I.TRACE (convertExp l (O.Var (x, Nothing))) (convertExp l e)
 convertExp l (O.Collect e1 e2) = liftM2 I.Collect (convertExp l e1) (convertExp l e2)
 
 ppADT :: Map I.ConId O.ConId -> I.Exp -> Doc 

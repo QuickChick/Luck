@@ -29,8 +29,9 @@ $lower    = [a-z]
 $upper    = [A-Z]
 $alpha    = [a-z A-Z]
 
-@lid      = $lower [$alpha \_ \' $digit]*
-@uid      = $upper [$alpha \_ \' $digit]*
+@lid      = $lower [$alpha \_ \' \. $digit]*
+@uid      = $upper [$alpha \_ \' \. $digit]*
+@str      = \" .* \"
 
 tokens :-
 
@@ -53,7 +54,13 @@ $white+         ;
   fix           { token TFix }
   fresh         { token TFresh }
   collect       { token TCollect }
-  
+  include       { token TInclude }
+  class         { token TClass }
+  instance      { token TInstance }
+  where         { token TWhere }
+  record        { token TRecord }
+
+  @str          { lexStr }
   @lid          { lexLid }
   @uid          { lexUid }
   $digit+       { lexInt }
@@ -89,6 +96,9 @@ $white+         ;
   ">="          { token TGe }
   "->"          { token TArrow }
   "|"           { token TBar }
+  "=>"          { token TFatArrow }
+  ";"           { token TSemiColon }
+  "."           { token TDot }
 
   "*)"          { mkLexerErrorP "Trying to close an unstarted comment" }
 }
@@ -106,8 +116,9 @@ $white+         ;
 data Token 
     = TAssign
     | TInt Int
-    | TVar  String
+    | TVar String
     | TCon String
+    | TStr String
     | TUnit
     | TLParen
     | TRParen
@@ -118,6 +129,7 @@ data Token
     | TLCurBracket
     | TRCurBracket
     | TBang
+    | TInclude
     | TCase
     | TOf
     | TEnd
@@ -130,6 +142,10 @@ data Token
     | TData
     | TSig
     | TFun
+    | TClass
+    | TInstance
+    | TRecord
+    | TWhere
     | TInp
     | TUnd
     | TCons
@@ -150,12 +166,15 @@ data Token
     | TLe
     | TGe
     | TArrow
+    | TFatArrow
     | TBar
     | TEof
     | TTRACE
     | TFix
     | TFresh 
     | TCollect
+    | TSemiColon
+    | TDot
   deriving (Eq, Show)
 
 -- | Lexer actions :: Position -> Buffer -> Length -> P (Located Token)
@@ -176,6 +195,12 @@ chain act code loc buf len = do {setLexState code ; act loc buf len}
 -- | Begin a specific code action
 begin :: Int -> Action
 begin code = skip `chain` code
+
+-- | Lex a string
+lexStr :: Action
+lexStr loc buf len = do
+    let _:str = BSU.toString $ BSU.take (fromIntegral (len-1)) buf
+    str `seq` return $ L loc (TStr str)
 
 -- | Lex a lowercase identifier
 lexLid :: Action

@@ -22,10 +22,21 @@ type ConId   = String
 type TyConId = String
 type VarId   = String
 type TyVarId = String
+type ClassId = String
 
 type OTcType = CT.TcType TyConId VarId 
 type OScheme = CT.Scheme TyConId TyVarId
 type OTcEnv  = CT.TcEnv VarId ConId TyConId TyVarId
+
+-- | Primes (@'@) mark an intermediate representation of types that
+-- distinguishes rigid variables from flexible ones.
+data TyVarId' = Flexible TyVarId
+              | Rigid TyVarId
+  deriving (Eq, Ord, Show)
+
+type OTcType' = CT.TcType TyConId TyVarId'
+type OScheme' = CT.Scheme TyConId TyVarId'
+type OTcEnv'  = CT.TcEnv VarId ConId TyConId TyVarId'
 
 -- | Program is a list of top-level declarations
 type Prg = [Decl] 
@@ -37,14 +48,17 @@ data ConDecl = ConDecl ConId [OTcType]          -- ^ ordinary data constructor
 -- | A top level declaration 
 data Decl = DataDecl SrcLoc TyConId [TyVarId] [ConDecl] 
             -- ^ Datatype declaration
-          | TypeSig SrcLoc VarId OTcType                      
+          | TypeSig SrcLoc VarId [(ClassId, OTcType)] OTcType                      
             -- ^ TcType signature declaration
-          | FunDecl SrcLoc VarId [(VarId,Maybe Int)] Exp
-            -- ^ Function declaration. 
+          | FunDecl SrcLoc VarId [(VarId,Maybe Int)] Exp (Maybe OTcType')
+            -- ^ Function declaration.
+          | IncludeDecl String
+          | ClassDecl SrcLoc ClassId TyVarId [(VarId, OTcType)]
+          | InstanceDecl SrcLoc ClassId OTcType [(ClassId, OTcType)] [(VarId, [(VarId, Maybe Int)], Exp, Maybe OTcType')]
             deriving (Eq, Ord, Show)
 
 -- | Core Language Expressions. Expose boolean primitives
-data Exp = Var VarId               -- ^ variable 
+data Exp = Var (VarId, Maybe OTcType') -- ^ variable and (maybe) type
          | Con ConId               -- ^ data constructor
          | Lit Literal             -- ^ literal constant
          | Unop Op1 Exp            -- ^ unary operators
@@ -57,6 +71,7 @@ data Exp = Var VarId               -- ^ variable
          | Let Binds Exp           -- ^ local declarations let ... in ...
          | Fix Exp                 -- ^ Fixpoint
          | FixN Int Exp            -- ^ Indexed fixpoint
+         | Fun [(VarId, Maybe Int)] Exp -- ^ Anonymous functions
          | Fresh VarId OTcType Exp Exp -- ^ Generate Fresh Variable of some type with some depth limit
          | Inst Exp VarId          -- ^ Post-fix Instantiation point
          | TRACE VarId Exp         -- ^ Trace a variable (debugging)
