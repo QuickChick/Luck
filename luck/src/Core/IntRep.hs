@@ -7,6 +7,7 @@ import Control.Monad
 import Control.Monad.Random
 
 import Common.Util
+import System.Random (Random, StdGen)
 
 -- | Smarter representation for primitives, allowing for faster (in-/dis-)equalities
 

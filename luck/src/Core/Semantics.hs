@@ -21,6 +21,7 @@ import Control.Monad.Signatures
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Random
+import System.Random (StdGen)
 
 import Data.Bifunctor(bimap)
 import Data.List(intersperse)
@@ -87,10 +88,6 @@ runLuck' rs fbs e w k g
 liftCatch' :: Monad m => Catch e m (a,s) -> Catch e (RandT s m) a
 liftCatch' catchE m h =
     liftRandT $ \ s -> runRandT m s `catchE` \ e -> runRandT (h e) s
-
-instance MonadError e m => MonadError e (RandT StdGen m) where
-    throwError = lift . throwError
-    catchError = liftCatch' catchError
 
 unsat :: String -> Luck a
 unsat msg = do 
