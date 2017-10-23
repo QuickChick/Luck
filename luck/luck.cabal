@@ -42,7 +42,7 @@ library
   hs-source-dirs:      src
   build-depends:       base >=4.7 && <5.0, pretty >=1.1 && <1.2, cmdargs, word8,
                        utf8-string, bytestring, mtl >= 2.2.1, array,
-                       containers, QuickCheck >= 2.7, random, MonadRandom,
+                       containers, QuickCheck >= 2.7, random, MonadRandom >= 0.5,
                        rosezipper >= 0.1, lens >= 4.9.1, template-haskell, 
                        transformers, filepath
 
