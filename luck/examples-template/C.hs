@@ -92,7 +92,7 @@ instance PP Stmt where
 --    pp x = error $ show x
 
 stmtGen :: Gen (Maybe [Stmt])
-stmtGen = $(mkGenQ "examples/C.luck") defFlags{_maxUnroll=2} TProxy1
+stmtGen = $(mkGenQ defFlags{_fileName="examples/C.luck", _maxUnroll=2}) tProxy1
 
 runWait c = do
   p <- runCommand c

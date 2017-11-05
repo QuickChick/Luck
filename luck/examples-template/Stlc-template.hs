@@ -15,7 +15,7 @@ data Term = Var Int
             deriving (Show, Data)
 
 gen :: Gen (Maybe Term)
-gen = $(mkGenQ defFlags{_fileName="examples/STLC.luck",_maxUnroll=2}) TProxy1
+gen = $(mkGenQ defFlags{_fileName="examples/STLC.luck", _maxUnroll=2}) tProxy1
 {-# NOINLINE gen #-}
 
 main = sample gen

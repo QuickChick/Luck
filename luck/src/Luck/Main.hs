@@ -57,9 +57,9 @@ data Returns m a where
   Cont :: TProxy a -> Returns Identity (StdGen -> Maybe a)
 
 data TProxy a where
-  TProxy1 :: Data a => TProxy a
-  TProxy2 :: (Data a, Data b) => TProxy (a, b)
-  TProxy3 :: (Data a, Data b, Data c) => TProxy (a, b, c)
+  TProxy0 :: TProxy ()
+  TProxyS :: Data a => TProxy b -> TProxy (a, b)
+  TProxyF :: (a -> b) -> TProxy a -> TProxy b
 
 runModeReturns Single = RunSingle
 runModeReturns Evaluate = RunEvaluate
@@ -192,13 +192,6 @@ parse Flags{..} ast r = do
       run_ runLuck g = runLuck rs fbs eFinal (PApp conTrue []) k g
       run = run_ runLuck
       run' = run_ runLuck'
-      convert_ :: Data a => DataTree ConId -> a
-      convert_ = Rigidify.convert conName (conIndices (ct_tcEnv coreResult))
-      convert' :: TProxy a -> [DataTree ConId] -> a
-      convert' TProxy1 [x] = convert_ x
-      convert' TProxy2 [x, y] = (convert_ x, convert_ y)
-      convert' TProxy3 [x, y, z] = (convert_ x, convert_ y, convert_ z)
-      convert' _ _ = error "convert': arity mismatch"
 
 --  putStrLn $ show (idx0+1, step)
 --  forM_ (Map.assocs fenvFinal) $ \(fid, FItem args e) -> do
@@ -227,8 +220,21 @@ parse Flags{..} ast r = do
         g <- getStdGen
         res <- aux 0 _evalTries
         putStrLn $ show res
-    Cont p -> let f = convert' p
-      in return $ \g ->
-        case run' g of
-          Right (((_,k'), _), g) -> Just (f (evalRand (snd <$> finalize k') g))
-          Left _ -> Nothing
+    Cont p ->
+      let
+        convert_ :: Data a => DataTree ConId -> a
+        convert_ = Rigidify.convert conName (conIndices (ct_tcEnv coreResult))
+        convert' :: TProxy a -> [DataTree ConId] -> a
+        convert' TProxy0 [] = ()
+        convert' (TProxyS p) (x : xs) = strictPair (convert_ x) (convert' p xs)
+        convert' (TProxyF f p) xs = f (convert' p xs)
+        convert' _ _ = error "convert': arity mismatch"
+        f = convert' p
+      in
+        return $ \g ->
+          case run' g of
+            Right (((_,k'), _), g) -> Just (f (evalRand (snd <$> finalize k') g))
+            Left _ -> Nothing
+
+strictPair :: a -> b -> (a, b)
+strictPair x y = x `seq` y `seq` (x, y)

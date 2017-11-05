@@ -49,7 +49,7 @@ unparse (Abs n _ e) = "(\\" ++ mapping n ++ " -> " ++ unparse e ++ ")"
 unparse (App _ e1 e2) = "(" ++ unparse e1 ++ " " ++ unparse e2 ++ ")"
 
 ghcGen :: Gen (Maybe Term)
-ghcGen = $(mkGenQ "examples/STLC.luck") defFlags{_maxUnroll=2} TProxy1
+ghcGen = $(mkGenQ defFlags{_fileName="examples/STLC.luck", _maxUnroll=2}) tProxy1
 
 --main = do 
 --  (x:_) <- sample' gen 
