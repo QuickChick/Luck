@@ -88,10 +88,6 @@ liftCatch' :: Monad m => Catch e m (a,s) -> Catch e (RandT s m) a
 liftCatch' catchE m h =
     liftRandT $ \ s -> runRandT m s `catchE` \ e -> runRandT (h e) s
 
-instance MonadError e m => MonadError e (RandT StdGen m) where
-    throwError = lift . throwError
-    catchError = liftCatch' catchError
-
 unsat :: String -> Luck a
 unsat msg = do 
   s <- get 
