@@ -1,5 +1,8 @@
+{-# LANGUAGE DeriveLift #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-missing-fields #-}
+
 module Luck.Template
   ( mkGenQ
   , TProxy (..)
@@ -7,10 +10,13 @@ module Luck.Template
   , defFlags
   ) where
 
+import Common.SrcLoc (SrcLoc(..))
+import Common.Types
+import Outer.AST
 import Luck.Main
 
-import Language.Haskell.TH
-import Language.Haskell.TH.Quote
+import Language.Haskell.TH.Syntax (Lift(..), Q, runIO)
+import qualified Language.Haskell.TH as TH
 
 import System.Random
 import Data.Functor.Identity
@@ -18,7 +24,7 @@ import qualified Test.QuickCheck.Gen as QC
 
 import Paths_luck
 
-import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString as BS
 
 -- * Luck to Haskell
 
@@ -28,29 +34,29 @@ import qualified Data.ByteString.Char8 as BS
 -- > -- Should satisfy @Data MyType@, and the definitions of types involved in @MyType@
 -- > -- should match those in the Luck program.
 -- > luckyGen :: QC.Gen (Maybe MyType)
--- > luckyGen = $(mkGenQ "path/to/MyLuckPrg.luck") defFlags TProxy1
-mkGenQ :: String -> Q Exp
-mkGenQ filename = [|
-  \flags proxy -> stdGenToGen (runIdentity (parse
-    flags{_fileName = $(literally filename)}
-    (BS.pack $(runIO preludeLuck >>= inlineFile))
-    (BS.pack $(inlineFile filename))
-    (Cont proxy))) |]
-
-literally :: String -> Q Exp
-literally = return . LitE . StringL
-
-lit :: QuasiQuoter
-lit = QuasiQuoter { quoteExp = literally }
-
--- | @[litFile|myFile|] :: String@ makes the content of @myFile@ available as a @String@
--- literal.
-litFile :: QuasiQuoter
-litFile = quoteFile lit
-
-inlineFile :: String -> Q Exp
-inlineFile = quoteExp litFile
+-- > luckyGen = $(mkGenQ defFlags{_fileName="path/to/MyLuckPrg.luck"}) TProxy1
+mkGenQ :: Flags -> Q TH.Exp
+mkGenQ flags = do
+  ast <- runIO $ getOAST flags
+  [| \proxy -> stdGenToGen (runIdentity (parse
+      $(lift flags)
+      $(lift ast)
+      (Cont proxy))) |]
 
 stdGenToGen :: (StdGen -> a) -> QC.Gen a
 stdGenToGen f = QC.MkGen $ \qcGen _ -> f' qcGen
   where f' = f . mkStdGen . fst . next
+
+deriving instance Lift RunMode
+deriving instance Lift Flags
+deriving instance Lift ConDecl
+deriving instance Lift Decl
+deriving instance Lift Exp
+deriving instance Lift TyVarId'
+deriving instance Lift Pat
+deriving instance Lift Literal
+deriving instance Lift Alt
+deriving instance Lift Op1
+deriving instance Lift Op2
+deriving instance Lift SrcLoc
+deriving instance (Lift c, Lift v) => Lift (TcType c v)

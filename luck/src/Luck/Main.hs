@@ -108,11 +108,7 @@ preludeLuck = getDataFileName "src/Luck/Prelude.luck"
 main :: IO ()
 main = do
   flags@Flags{..} <- cmdArgs defFlags
-  preludePath <- preludeLuck
-  prelude <- BS.readFile preludePath
-  contents <- BS.readFile _fileName
-  let relativePath = FN.takeDirectory _fileName
-  ast <- parseFiles flags relativePath prelude contents
+  ast <- getOAST flags
   parse flags ast (runModeReturns _runMode)
 
 handleIncludes :: String -> OAST.Decl -> IO [OAST.Decl]
@@ -125,6 +121,14 @@ handleIncludes _ x = return [x]
 
 handleAllInclusions :: String -> [OAST.Decl] -> IO [OAST.Decl]
 handleAllInclusions relPath l = concat <$> mapM (handleIncludes relPath) l
+
+getOAST :: Flags -> IO OAST.Prg
+getOAST flags@Flags{..} = do
+  preludePath <- preludeLuck
+  prelude <- BS.readFile preludePath
+  contents <- BS.readFile _fileName
+  let relativePath = FN.takeDirectory _fileName
+  parseFiles flags relativePath prelude contents
 
 parseFiles Flags{..} relativePath prelude contents = do
   astPrelude <- failEither $ runP parser $ mkPState prelude (SrcLoc "Prelude" 1 1)
