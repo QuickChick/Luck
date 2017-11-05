@@ -1,0 +1,7 @@
+resolver: lts-9.11
+packages:
+- .
+extra-deps:
+- 'rosezipper-0.2'
+flags: {}
+extra-package-dbs: []
