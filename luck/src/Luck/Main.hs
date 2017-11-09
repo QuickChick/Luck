@@ -68,11 +68,11 @@ data Flags = Flags { _fileName :: String
                    , _function :: Maybe String
                    , _runMode  :: RunMode
                    , _evalTries :: Int
-                   , _tryGenerator :: Maybe (String, Int, Int)
+                   -- , _tryGenerator :: Maybe (String, Int, Int)
                    , _fullOutput :: Int
                    , _noSample :: Bool
                    , _maxUnroll :: Int
-                   , _warnings :: Bool
+                   -- , _warnings :: Bool
                    , _maxBacktrack :: Int
                    , _defDepth :: Int
                    , _intRangeMin :: Int
@@ -84,10 +84,10 @@ defFlags = Flags { _fileName = "" &= argPos 0 &= typFile
                  , _function = Nothing &= name "fun"
                  , _runMode  = Single  &= name "mode"
                  , _evalTries = 1000  &= name "reps"
-                 , _tryGenerator = Nothing &= name "debug-trygen"
-                     &= typ "TYPE,SIZE,RPT"
-                     &= help "Generate RPT random values of type TYPE \
-                             \with size SIZE, ex: \"[[Bool]]\",14,4"
+                 -- , _tryGenerator = Nothing &= name "debug-trygen"
+                 --     &= typ "TYPE,SIZE,RPT"
+                 --     &= help "Generate RPT random values of type TYPE \
+                 --             \with size SIZE, ex: \"[[Bool]]\",14,4"
                  , _fullOutput = 5 &= name "f" &= name "full-output"
                      &= opt (0 :: Int)
                      &= help "With no argument, do not truncate the output. \
@@ -96,7 +96,7 @@ defFlags = Flags { _fileName = "" &= argPos 0 &= typFile
                      &= help "Do not sample holes"
                  , _maxUnroll = 0 &= name "maxUnroll"
                      &= help "Maximum number of times to unroll a function"
-                 , _warnings = True &= name "warnings"
+                 -- , _warnings = True &= name "warnings"
                  , _maxBacktrack = maxBound &= name "max-backtrack"
                  , _defDepth = 10 &= name "default-depth"
                  , _intRangeMin = -42 &= name "irmin" &= help "Bottom of default int range"
