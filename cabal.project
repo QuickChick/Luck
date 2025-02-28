@@ -1,0 +1,5 @@
+packages: luck
+
+allow-newer:
+  semigroupoids:base
+

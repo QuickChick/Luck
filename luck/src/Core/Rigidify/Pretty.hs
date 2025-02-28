@@ -1,5 +1,6 @@
 module Core.Rigidify.Pretty where
 
+import Prelude hiding ((<>))
 import Data.List
 import Data.Map (Map)
 import qualified Data.Map as Map

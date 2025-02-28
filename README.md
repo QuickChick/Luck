@@ -1,3 +1,8 @@
+## Note: 2025 update for Luck Haskell implementation
+
+After a little update, Luck builds with a modern GHC (9.6.5) using `cd luck && cabal build`.
+
+
 # Luck -- A Language for Property-Based Generators
 
 Accompanying material for the following POPL 2017 paper:
