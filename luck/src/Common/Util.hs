@@ -93,7 +93,7 @@ lookupR y m = Map.lookup y (snd m)
 liftEither :: MonadError e m => Either e a -> m a
 liftEither = either throwError return
 
-failEither :: (Monad m, Show e) => Either e a -> m a
+failEither :: (Monad m, MonadFail m, Show e) => Either e a -> m a
 failEither = either (fail . show) return
 
 randomize :: (MonadRandom m) => [(Int, a)] -> m [a]

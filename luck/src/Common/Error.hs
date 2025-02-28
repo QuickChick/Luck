@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Common.Error where
 
 import Common.SrcLoc 
@@ -73,10 +74,11 @@ mkError s = Message (GenericError s) noLoc ""
 -- | This is horrible :D
 instance Monoid Message where
     mempty = Message (GenericError "mempty") noLoc ""
-    mappend _m1 _m2 = error "Monoid message"
+instance Semigroup Message where
+    (<>) _m1 _m2 = error "Monoid message"
 
---instance Error Message where
---    strMsg s = Message (GenericError s) noLoc ""
+instance MonadFail (Either Message) where
+    fail s = Left $ Message (GenericError s) noLoc ""
 
 throwInternalE :: MonadError Message m => String -> m a
 throwInternalE = throwError . mkInternalError

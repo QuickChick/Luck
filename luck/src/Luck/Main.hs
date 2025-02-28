@@ -137,7 +137,7 @@ parseFiles Flags{..} relativePath prelude contents = do
   astIncluded <- handleAllInclusions relativePath astOriginal
   return (astPrelude ++ astIncluded)
 
-parse :: Monad m => Flags -> OAST.Prg -> Returns m a -> m a
+parse :: (Monad m, MonadFail m) => Flags -> OAST.Prg -> Returns m a -> m a
 parse Flags{..} ast r = do
   (fwdRenMap, revRenMap, astRenamed) <- failEither $ rename ast
 --  traceM $ unlines (map show astRenamed)
