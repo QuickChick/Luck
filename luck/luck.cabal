@@ -45,6 +45,7 @@ library
                        containers, QuickCheck >= 2.7, random, MonadRandom >= 0.5,
                        rosezipper >= 0.1, lens >= 4.9.1, template-haskell, 
                        transformers, filepath
+  build-tool-depends:  happy:happy, alex:alex
 
   other-modules:       Paths_luck
 
